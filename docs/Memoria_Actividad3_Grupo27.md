@@ -20,12 +20,12 @@ Esta memoria documenta exclusivamente el subsistema software. Se describen la ar
 
 Con carácter previo a la descripción de la lógica de control, se relacionan los periféricos que intervienen en el sistema. La Figura 1 muestra el montaje completo implementado en Wokwi y la Figura 2 representa la arquitectura por bloques del sistema, diferenciando las entradas de las salidas gestionadas por el firmware.
 
-![](media/image4.png)
-
+<div align="center">
+<img src="media/image4.png" width="85%">
+</div>
 *Figura 1. Captura del montaje completo en Wokwi (Arduino UNO + servo + DHT22 + PIR + IR + LDR + 74HC595 + 8 LEDs + pulsadores PCF8574 + LCD I²C + RFID MFRC522).*
 
 ![](media/image1.png)
-
 *Figura 2. Arquitectura por bloques del sistema. En azul, las entradas (sensores, lector RFID, pulsadores, mando IR); en verde, los actuadores y la interfaz de usuario (servo, LCD, LEDs y electroválvulas).*
 
 - Arduino UNO como unidad de control central.
@@ -47,13 +47,12 @@ Un requisito de diseño prioritario ha sido garantizar que el firmware opere de 
 El reparto temporal de las tareas se ha definido conforme al siguiente criterio: la máquina de estados se evalúa en cada iteración del bucle; la lectura de pulsadores y del mando IR se realiza cada 10 ms, con un filtro anti-rebote de 25 ms integrado en la propia rutina de lectura; el lector RFID se consulta cada 200 ms, periodo sobradamente suficiente dada la dinámica de presentación de una tarjeta; los sensores ambientales (DHT22, LDR y PIR) se muestrean cada 2 s; el controlador PID de temperatura se ejecuta cada 500 ms; el display LCD se refresca cada 2 s alternando entre dos pantallas; y el control de iluminación se evalúa en cada iteración del bucle, con objeto de minimizar la latencia de respuesta ante variaciones bruscas de iluminancia.
 
 ![](media/image2.png)
-
 *Figura 3. Diagrama de flujo del bucle principal loop(). Cada bloque verde, morado o rojo se ejecuta sólo cuando se cumple su condición temporal asociada; los bloques blancos representan los chequeos de Δt basados en millis().*
 
 ### Bucle principal
 
 El bucle principal presenta una estructura compacta: la totalidad de la complejidad funcional se delega en la función manejarEstadoAscensor() y en las rutinas auxiliares. El listado siguiente reproduce su implementación:
-```C++
+```cpp
 void loop() {
 
 unsigned long ahora = millis();
@@ -130,8 +129,7 @@ Cabe destacar un criterio de seguridad relevante: en el estado de EMERGENCIA se 
 
 El comportamiento del ascensor se modela mediante una máquina de estados finita (FSM) compuesta por seis estados. Su diseño responde tanto a la experiencia funcional del usuario como al comportamiento físico esperado del sistema: la cabina permanece detenida, recibe una llamada, cierra la puerta, se desplaza hasta el destino, mantiene la puerta abierta durante un intervalo determinado y retorna al estado de reposo. A esta secuencia se añaden un estado de EMERGENCIA y un estado de MANTENIMIENTO; este último queda reservado para tareas de diagnóstico en la presente versión.
 
-![](media/image4.png)
-
+![](media/image5.png)
 *Figura 4. Máquina de estados del ascensor con sus transiciones principales. Las flechas verdes indican llegada al destino; las rojas, evento de emergencia.*
 
 ### Descripción de los estados
@@ -151,7 +149,7 @@ El comportamiento del ascensor se modela mediante una máquina de estados finita
 ### Función de transición de estados
 
 La gestión de las transiciones se centraliza en la función transicionEstado(), responsable tanto de las acciones de salida del estado actual como de las acciones de entrada al nuevo estado. Esta centralización evita la duplicación de lógica a lo largo del código y facilita la reinicialización de los temporizadores globales (tPuertaAbierta, tPuertaCerrada y tEmergencia) en el punto adecuado del flujo:
-```C++
+```cpp
 void transicionEstado(EstadoAscensor nuevoEstado) {
 
 // Acciones de salida del estado actual
@@ -217,7 +215,7 @@ En la transición a REPOSO se reinicializan tanto la dirección de marcha como l
 ### Lógica del estado MOVIMIENTO
 
 El estado MOVIMIENTO concentra tres responsabilidades funcionales: el recálculo del destino mediante el algoritmo SCAN, el accionamiento del servomotor a través del controlador difuso y la supervisión de las condiciones de emergencia. El siguiente fragmento corresponde a la rama del switch principal asociada a dicho estado:
-```C++
+```cpp
 case ASCENSOR_MOVIMIENTO:
 
 // Recalcular prioridad con validación de redirección coherente
@@ -277,7 +275,7 @@ El algoritmo SCAN ---también denominado elevator algorithm en la literatura, pr
 ### Estructura de datos de la cola
 
 La implementación del algoritmo SCAN requiere conocer las plantas con solicitudes pendientes y, como criterios secundarios de desempate, el instante de la primera pulsación (antigüedad) y el número de pulsaciones acumuladas por planta (demanda). A tal efecto se definen tres vectores paralelos de tamaño cinco:
-```C++
+```cpp
 #define MAX_PLANTAS 5
 
 bool solicitudes[MAX_PLANTAS] = {false, false, false, false, false};
@@ -293,7 +291,7 @@ enum DireccionAscensor { DIR_NINGUNA, DIR_SUBIENDO, DIR_BAJANDO };
 DireccionAscensor direccionActual = DIR_NINGUNA;
 ```
 La recepción de una pulsación ---procedente del PCF8574 o del mando IR--- invoca agregarSolicitud(), que marca la planta como pendiente, actualiza el contador y, en la primera pulsación, registra el instante asociado. Al alcanzar el destino se invoca eliminarSolicitud(), que libera la entrada correspondiente:
-```C++
+```cpp
 void agregarSolicitud(uint8_t planta) {
 
 if (planta < 1 || planta > MAX_PLANTAS) return;
@@ -316,12 +314,11 @@ Se incorpora una protección frente a desbordamiento (corrección v4.4): el cont
 
 ### Función calcularPrioridad()
 
-![](media/image5.png)
-
+![](media/image6.png)
 *Figura 5. Flujo del algoritmo SCAN implementado en calcularPrioridad(). Las fases 1 y 2 corresponden a la búsqueda en la dirección actual y opuesta respectivamente; con carácter previo se evalúa la solicitud en la planta actual.*
 
 La función calcularPrioridad() devuelve la planta de destino. En la versión v4.3 se rediseñó para eliminar comportamientos indeseados de versiones anteriores ---modificación de la dirección como efecto colateral y priorización deficiente de la planta actual--- y garantizar un flujo determinista. Su estructura, ya con las correcciones aplicadas, es la siguiente:
-```C++
+```cpp
 uint8_t calcularPrioridad() {
 
 if (numSolicitudes == 0) return 0;
@@ -397,7 +394,7 @@ La jerarquía de los criterios de prioridad es determinante: en primer lugar la 
 ### Validación de redirecciones
 
 La función esRedireccionValida() actúa como salvaguarda de las redirecciones durante el estado MOVIMIENTO. Introducida en la versión v4.2, su finalidad es impedir cambios de destino carentes de coherencia física ---por ejemplo, hacia una planta ya rebasada---. En la versión v4.3 se reforzó el criterio, admitiendo durante el movimiento exclusivamente paradas intermedias coherentes con la dirección actual:
-```C++
+```cpp
 bool esRedireccionValida(uint8_t nuevaPlanta) {
 
 if (nuevaPlanta < 1 || nuevaPlanta > MAX_PLANTAS) return false;
@@ -436,16 +433,13 @@ El controlador implementado es de tipo Mamdani, con dos variables de entrada y u
 - Entrada 2: velocidadActual --- incremento angular por ciclo aplicado en el ciclo anterior, en el rango de 0 (reposo) a 8 °/ciclo (saturación).
 - Salida: deltaAngulo --- incremento angular a aplicar en el ciclo actual, comprendido aproximadamente entre 0° y 6°.
 
-![](media/image6.png)
-
+![](media/image7.png)
 *Figura 6. Conjuntos difusos definidos para la entrada distanciaRestante. Tres conjuntos trapezoidales: CERCA, MEDIA y LEJOS.*
 
-![](media/image7.png)
-
+![](media/image8.png)
 *Figura 7. Conjuntos difusos definidos para la entrada velocidadActual. Dos trapezoidales (LENTA y RÁPIDA) y uno triangular (MEDIA).*
 
-![](media/image8.png)
-
+![](media/image9.png)
 *Figura 8. Singletones de salida (deltaAngulo). Cada regla activa desplaza la salida hacia uno de estos cinco valores discretos.*
 
 ### Base de reglas difusas
@@ -465,7 +459,7 @@ La interpretación física de las reglas es directa: a distancia elevada y veloc
 ### Función de fuzzificación trapezoidal
 
 El grado de pertenencia de un valor a un conjunto trapezoidal se calcula mediante la siguiente función. El conjunto queda definido por cuatro puntos (a, b, c, d) que delimitan el soporte y el núcleo del trapecio:
-```C++
+```cpp
 float fuzzificarTrapezoidal(float x, float a, float b, float c, float d) {
 
 // Se emplean los operadores < / > en los extremos (no <= / >=). Es relevante:
@@ -489,7 +483,7 @@ return (d - x) / (d - c);
 ### Inferencia y defuzzificación
 
 El método de inferencia es Mamdani, con la conjunción AND implementada como operador mínimo. La defuzzificación se realiza por media ponderada de singletones, método de bajo coste computacional especialmente adecuado para microcontroladores, al no requerir el cálculo de áreas:
-```C++
+```cpp
 float controlFuzzy(float distancia, float velocidad) {
 
 // --- FASE 1: Fuzzificación de las entradas ---
@@ -546,8 +540,7 @@ Esta función se invoca desde moverAscensor() con un periodo de SERVO_INTERVALO 
 
 La climatización de la cabina se implementa mediante un controlador PID discreto. La consigna (setpoint) se establece en 25 °C, y los actuadores corresponden a dos LEDs ---azul y rojo--- que representan las electroválvulas de frío y calor respectivamente. Dado que dichas electroválvulas son de naturaleza binaria (ON/OFF) y no admiten modulación, la señal de control continua u(t) generada por el PID se convierte en una actuación discreta mediante una banda muerta.
 
-![](media/image9.png)
-
+![](media/image10.png)
 *Figura 9. Diagrama de bloques del lazo de control PID de temperatura.*
 
 ### Parámetros y ecuación de control
@@ -566,7 +559,7 @@ La ecuación de control adopta la forma canónica: u(t) = Kp · e(t) + Ki · ∫
 ### Implementación
 
 La función controlTemperatura() presenta una implementación directa. Los aspectos de mayor relevancia son, en primer lugar, el cálculo de dt en segundos a partir de millis(), necesario para conferir significado físico a las ganancias Ki y Kd, y, en segundo lugar, la saturación del término integral mediante constrain(), que previene el fenómeno de integral windup:
-```C++
+```cpp
 void controlTemperatura() {
 
 unsigned long ahora = millis();
@@ -638,7 +631,7 @@ Los umbrales de operación definidos son los siguientes:
 - Histéresis = ±10 lux, que delimita una zona muerta entre 390 y 410 lux.
 
 El procedimiento divide el rango de 0 a 400 lux en 8 intervalos iguales de 50 lux, cada uno asociado a un LED. Cuanto menor es la iluminancia natural, mayor es el número de intervalos requeridos para alcanzar el umbral y, por tanto, mayor el número de LEDs activados. La expresión aplicada es LEDs = 8 − floor(luz / 50).
-```C++
+```cpp
 void controlIluminacion() {
 
 if (luzLux < (LUZ_UMBRAL - LUZ_HISTERESIS)) {
@@ -672,7 +665,7 @@ actualizarLeds(ledsEncendidos); } }
 ### Escritura sobre el 74HC595
 
 La transferencia de la máscara de bits al registro de desplazamiento se realiza mediante la función shiftOut() de Arduino, que implementa una transmisión serie por software. La función actualizarLeds() compone la máscara y escribir595() la transfiere al dispositivo:
-```C++
+```cpp
 void actualizarLeds(uint8_t cantidad) {
 
 uint8_t mascara = 0;
@@ -696,7 +689,7 @@ El sistema incorpora un subsistema de control de acceso a la quinta planta basad
 ### Lista blanca de tarjetas
 
 Cada tarjeta MIFARE Classic 1K dispone de un UID de 4 bytes. La lista blanca se almacena como un vector bidimensional de bytes:
-```C++
+```cpp
 #define NUM_TARJETAS_REG 9
 
 const byte TARJETAS_AUTORIZADAS[NUM_TARJETAS_REG][10] = {
@@ -714,7 +707,7 @@ const byte TARJETAS_AUTORIZADAS[NUM_TARJETAS_REG][10] = {
 ### Función gestionarAccesoP5()
 
 Esta función se invoca desde el bucle principal con un periodo de 200 ms. Sus responsabilidades son la comprobación de la expiración del periodo de autorización, la detección de tarjetas, la comparación del UID con la lista blanca y, en su caso, la habilitación del acceso:
-```C++
+```cpp
 void gestionarAccesoP5() {
 
 unsigned long ahora = millis();
@@ -754,7 +747,7 @@ mfrc522.PICC_HaltA();
 mfrc522.PCD_StopCrypto1(); }
 ```
 La inhibición de la llamada a P5 se aplica tanto en leerPulsadores() como en leerIR(), mediante una verificación previa a la inserción de la solicitud en la cola:
-```C++
+```cpp
 // Dentro de leerPulsadores() / leerIR(), antes de encolar la planta 5:
 
 if (plantaSolicitada == 5) {
@@ -774,7 +767,7 @@ Se ha adoptado deliberadamente el criterio de completar el trayecto en curso aun
 ### determinarPlantaDesdeAngulo() con histéresis
 
 Esta función determina la planta en la que se encuentra físicamente la cabina a partir del ángulo actual del servomotor. La dificultad reside en que, durante el movimiento, el ángulo recorre valores intermedios y la planta lógica podía adelantarse al destino, abriendo un intervalo en el que se cumplía plantaActual == plantaDestino sin que el servomotor hubiese alcanzado aún su posición. La versión v4.3 introduce histéresis: plantaActual se actualiza únicamente si el servomotor se halla dentro de ±10° del ángulo nominal de una planta; en las zonas de tránsito conserva el valor anterior:
-```C++
+```cpp
 uint8_t determinarPlantaDesdeAngulo(int angulo) {
 
 for (uint8_t i = 0; i < MAX_PLANTAS; i++) {
@@ -824,7 +817,7 @@ estadoAnterior = estadoActual;
 ### Lectura del LDR y conversión a lux
 
 El sensor LDR proporciona una lectura analógica comprendida entre 0 y 1023. La conversión a lux se realiza en dos etapas: en primer lugar se obtiene la resistencia del LDR a partir del divisor de tensión del módulo (resistencia serie de 2 kΩ); a continuación se aplica la ecuación característica logarítmica del sensor (R_L10 = 50 kΩ a 10 lux, γ = 0.7):
-```C++
+```cpp
 float leerLux() {
 
 int analogValue = analogRead(PIN_LDR);
@@ -844,7 +837,7 @@ return lux; }
 ### Refresco del display LCD
 
 El display LCD I²C 16×2 presenta dos pantallas alternadas con un periodo de 2 segundos. La pantalla 0 indica la planta actual y el estado de ocupación de la cabina (señal del sensor PIR); la pantalla 1 muestra la temperatura, la humedad, la iluminancia y la acción de climatización en curso. Durante el desplazamiento se fuerza la pantalla 0, de modo que el usuario disponga en todo momento de la información de estado de la cabina:
-```C++
+```cpp
 void actualizarLCD() {
 
 lcd.clear();

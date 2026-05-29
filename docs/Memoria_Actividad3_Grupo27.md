@@ -1,9 +1,9 @@
 ---
-title: "Ascensor Inteligente ACME S.A. — Memoria Técnica"
-subtitle: "Actividad 3 — Lógica del firmware (v4.4)"
-author: "Grupo 27 (Amaya Álvarez, Jesús Macanás, Pablo Marín, Sergio Pérez)"
+título: "Ascensor Inteligente ACME S.A. — Memoria Técnica"
+subtítulo: "Actividad 3 — Lógica del firmware (v4.4)"
+autor: "Grupo 27 (Amaya Álvarez, Jesús Macanás, Pablo Marín, Sergio Pérez)"
 profesor: "Iván Araquistain"
-date: "Junio 2026"
+fecha: "Junio 2026"
 Wokwi: "https://wokwi.com/projects/464679537824441345"
 GitHub: "https://github.com/pmaringo/Actividad-3-grupo-27-Arduino/"
 ---

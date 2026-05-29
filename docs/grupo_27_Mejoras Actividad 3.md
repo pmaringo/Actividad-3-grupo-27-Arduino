@@ -1,8 +1,8 @@
 ---
-title: "Proyecto de perfeccionamiento del sistema de control del ascensor inteligente ACME"
-subtitle: "De la Actividad 2 a la Actividad 3 — Versión 4.4"
-author: "Grupo 27"
-date: Junio 2026
+título: "Proyecto de perfeccionamiento del sistema de control del ascensor inteligente ACME"
+subtítulo: "De la Actividad 2 a la Actividad 3 — Versión 4.4"
+autor: "Grupo 27"
+fecha: Junio 2026
 ---
 
 Proyecto de perfeccionamiento del sistema de control del ascensor inteligente ACME, de la Actividad 2 a la Actividad 3. Aquí se documentan las mejoras que se han implementado.

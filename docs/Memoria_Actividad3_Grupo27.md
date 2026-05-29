@@ -20,13 +20,15 @@ Esta memoria documenta exclusivamente el subsistema software. Se describen la ar
 
 Con carácter previo a la descripción de la lógica de control, se relacionan los periféricos que intervienen en el sistema. La Figura 1 muestra el montaje completo implementado en Wokwi y la Figura 2 representa la arquitectura por bloques del sistema, diferenciando las entradas de las salidas gestionadas por el firmware.
 
-<div align="center">
-<img src="media/image4.png" width="85%">
-</div>
-*Figura 1. Captura del montaje completo en Wokwi (Arduino UNO + servo + DHT22 + PIR + IR + LDR + 74HC595 + 8 LEDs + pulsadores PCF8574 + LCD I²C + RFID MFRC522).*
+<p align="center">
+  <img src="media/image4.png" width="85%"><br>
+  <small><em>Figura 1. Captura del montaje completo en Wokwi (Arduino UNO + servo + DHT22 + PIR + IR + LDR + 74HC595 + 8 LEDs + pulsadores PCF8574 + LCD I²C + RFID MFRC522).</em></small>
+</p>
 
-![](media/image1.png)
-*Figura 2. Arquitectura por bloques del sistema. En azul, las entradas (sensores, lector RFID, pulsadores, mando IR); en verde, los actuadores y la interfaz de usuario (servo, LCD, LEDs y electroválvulas).*
+<p align="center">
+  <img src="media/image1.png" width="85%"><br>
+  <small><em>Figura 2. Arquitectura por bloques del sistema. En azul, las entradas (sensores, lector RFID, pulsadores, mando IR); en verde, los actuadores y la interfaz de usuario (servo, LCD, LEDs y electroválvulas).</em></small>
+</p>
 
 - Arduino UNO como unidad de control central.
 - Servomotor SG90 que emula el desplazamiento de la cabina (pin 3, PWM).
@@ -46,8 +48,10 @@ Un requisito de diseño prioritario ha sido garantizar que el firmware opere de 
 
 El reparto temporal de las tareas se ha definido conforme al siguiente criterio: la máquina de estados se evalúa en cada iteración del bucle; la lectura de pulsadores y del mando IR se realiza cada 10 ms, con un filtro anti-rebote de 25 ms integrado en la propia rutina de lectura; el lector RFID se consulta cada 200 ms, periodo sobradamente suficiente dada la dinámica de presentación de una tarjeta; los sensores ambientales (DHT22, LDR y PIR) se muestrean cada 2 s; el controlador PID de temperatura se ejecuta cada 500 ms; el display LCD se refresca cada 2 s alternando entre dos pantallas; y el control de iluminación se evalúa en cada iteración del bucle, con objeto de minimizar la latencia de respuesta ante variaciones bruscas de iluminancia.
 
-![](media/image2.png)
-*Figura 3. Diagrama de flujo del bucle principal loop(). Cada bloque verde, morado o rojo se ejecuta sólo cuando se cumple su condición temporal asociada; los bloques blancos representan los chequeos de Δt basados en millis().*
+<p align="center">
+  <img src="media/image2.png" width="70%"><br>
+  <small><em>Figura 3. Diagrama de flujo del bucle principal loop(). Cada bloque verde, morado o rojo se ejecuta sólo cuando se cumple su condición temporal asociada; los bloques blancos representan los chequeos de Δt basados en millis().</em></small>
+</p>
 
 ### Bucle principal
 
@@ -129,8 +133,10 @@ Cabe destacar un criterio de seguridad relevante: en el estado de EMERGENCIA se 
 
 El comportamiento del ascensor se modela mediante una máquina de estados finita (FSM) compuesta por seis estados. Su diseño responde tanto a la experiencia funcional del usuario como al comportamiento físico esperado del sistema: la cabina permanece detenida, recibe una llamada, cierra la puerta, se desplaza hasta el destino, mantiene la puerta abierta durante un intervalo determinado y retorna al estado de reposo. A esta secuencia se añaden un estado de EMERGENCIA y un estado de MANTENIMIENTO; este último queda reservado para tareas de diagnóstico en la presente versión.
 
-![](media/image5.png)
-*Figura 4. Máquina de estados del ascensor con sus transiciones principales. Las flechas verdes indican llegada al destino; las rojas, evento de emergencia.*
+<p align="center">
+  <img src="media/image5.png" width="70%"><br>
+  <small><em>Figura 4. Máquina de estados del ascensor con sus transiciones principales. Las flechas verdes indican llegada al destino; las rojas, evento de emergencia.</em></small>
+</p>
 
 ### Descripción de los estados
 
@@ -314,8 +320,10 @@ Se incorpora una protección frente a desbordamiento (corrección v4.4): el cont
 
 ### Función calcularPrioridad()
 
-![](media/image6.png)
-*Figura 5. Flujo del algoritmo SCAN implementado en calcularPrioridad(). Las fases 1 y 2 corresponden a la búsqueda en la dirección actual y opuesta respectivamente; con carácter previo se evalúa la solicitud en la planta actual.*
+<p align="center">
+  <img src="media/image6.png" width="70%"><br>
+  <small><em>Figura 5. Flujo del algoritmo SCAN implementado en calcularPrioridad(). Las fases 1 y 2 corresponden a la búsqueda en la dirección actual y opuesta respectivamente; con carácter previo se evalúa la solicitud en la planta actual.</em></small>
+</p>
 
 La función calcularPrioridad() devuelve la planta de destino. En la versión v4.3 se rediseñó para eliminar comportamientos indeseados de versiones anteriores ---modificación de la dirección como efecto colateral y priorización deficiente de la planta actual--- y garantizar un flujo determinista. Su estructura, ya con las correcciones aplicadas, es la siguiente:
 ```cpp
@@ -432,15 +440,20 @@ El controlador implementado es de tipo Mamdani, con dos variables de entrada y u
 - Entrada 1: distanciaRestante --- diferencia angular entre el ángulo actual del servo y el ángulo del destino, en el rango de 0° a 180° (P1 en 0° y P5 en 180°).
 - Entrada 2: velocidadActual --- incremento angular por ciclo aplicado en el ciclo anterior, en el rango de 0 (reposo) a 8 °/ciclo (saturación).
 - Salida: deltaAngulo --- incremento angular a aplicar en el ciclo actual, comprendido aproximadamente entre 0° y 6°.
+<p align="center">
+  <img src="media/image7.png" width="80%"><br>
+  <small><em>Figura 6. Conjuntos difusos definidos para la entrada distanciaRestante. Tres conjuntos trapezoidales: CERCA, MEDIA y LEJOS.</em></small>
+</p>
 
-![](media/image7.png)
-*Figura 6. Conjuntos difusos definidos para la entrada distanciaRestante. Tres conjuntos trapezoidales: CERCA, MEDIA y LEJOS.*
+<p align="center">
+  <img src="media/image8.png" width="80%"><br>
+  <small><em>Figura 7. Conjuntos difusos definidos para la entrada velocidadActual. Dos trapezoidales (LENTA y RÁPIDA) y uno triangular (MEDIA).</em></small>
+</p>
 
-![](media/image8.png)
-*Figura 7. Conjuntos difusos definidos para la entrada velocidadActual. Dos trapezoidales (LENTA y RÁPIDA) y uno triangular (MEDIA).*
-
-![](media/image9.png)
-*Figura 8. Singletones de salida (deltaAngulo). Cada regla activa desplaza la salida hacia uno de estos cinco valores discretos.*
+<p align="center">
+  <img src="media/image9.png" width="80%"><br>
+  <small><em>Figura 8. Singletones de salida (deltaAngulo). Cada regla activa desplaza la salida hacia uno de estos cinco valores discretos.</em></small>
+</p>
 
 ### Base de reglas difusas
 
@@ -540,8 +553,10 @@ Esta función se invoca desde moverAscensor() con un periodo de SERVO_INTERVALO 
 
 La climatización de la cabina se implementa mediante un controlador PID discreto. La consigna (setpoint) se establece en 25 °C, y los actuadores corresponden a dos LEDs ---azul y rojo--- que representan las electroválvulas de frío y calor respectivamente. Dado que dichas electroválvulas son de naturaleza binaria (ON/OFF) y no admiten modulación, la señal de control continua u(t) generada por el PID se convierte en una actuación discreta mediante una banda muerta.
 
-![](media/image10.png)
-*Figura 9. Diagrama de bloques del lazo de control PID de temperatura.*
+<p align="center">
+  <img src="media/image10.png" width="80%"><br>
+  <small><em>Figura 9. Diagrama de bloques del lazo de control PID de temperatura.</em></small>
+</p>
 
 ### Parámetros y ecuación de control
 

@@ -2396,3 +2396,4 @@ void transicionEstado(EstadoAscensor nuevoEstado) {
     Serial.println(nombreEstado(nuevoEstado));
   }
 }
+/* Fin de archivo */

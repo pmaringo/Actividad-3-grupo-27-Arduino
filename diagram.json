@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "author": "Pablo Marin - Ascensor ACME v3.0",
+  "author": "Grupo 27 - Ascensor ACME v4.4",
   "editor": "wokwi",
   "parts": [
     { "type": "wokwi-arduino-uno", "id": "uno", "top": 200, "left": 200, "attrs": {} },

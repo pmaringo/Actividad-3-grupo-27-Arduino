@@ -217,8 +217,7 @@ bool tarjetaAutorizada(byte *uidBuffer, byte bufferSize) {
         coincide = false; break; 
       }
     }
-    if (coincide) return true;
-  }
+    if (coincide) return true; }
   return false;
 }
 ```

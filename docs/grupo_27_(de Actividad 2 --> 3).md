@@ -307,6 +307,7 @@ Como líneas de mejora a futuro identificamos varias direcciones interesantes. L
 
 ## 13. Referencias y enlaces
 
+- Repositorio del proyecto en GitHub: https://github.com/pmaringo/Actividad-3-grupo-27-Arduino/
 - Repositorio de simulación Wokwi v4.4: https://wokwi.com/projects/464679537824441345
 - Repositorio de simulación Wokwi v2.0 (versión de partida): https://wokwi.com/projects/461843709827701761
 - Datasheet Arduino Uno (ATmega328P).

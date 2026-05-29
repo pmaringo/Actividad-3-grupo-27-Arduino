@@ -479,7 +479,8 @@ se completa aunque expire el periodo de autorización durante el trayecto.
 
 | Documento                                                                | Contenido                                                |
 | ------------------------------------------------------------------------ | -------------------------------------------------------- |
-| [`docs/Memoria_Actividad3_Grupo27.docx`](docs/Memoria_Actividad3_Grupo27.docx) | Memoria técnica completa del firmware (11 capítulos)     |
+| [`docs/Memoria_Actividad3_Grupo27.md`](docs/Memoria_Actividad3_Grupo27.md) | Memoria técnica completa del firmware (11 capítulos)     |
+| [`docs/grupo_27_Mejoras_Actividad_3.md`](docs/grupo_27_Mejoras_Actividad_3.md) | Mejoras de la Actividad 3 sobre la Actividad 2     |
 | [`docs/BOM.md`](docs/BOM.md)                                             | Lista de componentes con precios escalados por volumen   |
 | [`docs/ANALISIS_COSTES.md`](docs/ANALISIS_COSTES.md)                     | Análisis de costes de desarrollo y cálculo de PVP        |
 | [`firmware/main.cpp`](firmware/main.cpp)                                 | Código fuente del firmware, ampliamente comentado        |

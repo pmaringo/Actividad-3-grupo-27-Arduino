@@ -51,7 +51,7 @@ El reparto temporal de las tareas se ha definido conforme al siguiente criterio:
 ### Bucle principal
 
 El bucle principal presenta una estructura compacta: la totalidad de la complejidad funcional se delega en la función manejarEstadoAscensor() y en las rutinas auxiliares. El listado siguiente reproduce su implementación:
-
+```C++
 void loop() {
 
 unsigned long ahora = millis();
@@ -71,10 +71,6 @@ if (estadoAscensor != ASCENSOR_EMERGENCIA) {
 leerPulsadores();
 
 leerIR();
-
-}
-
-}
 
 // 2. Control de acceso RFID cada 200 ms
 
@@ -125,9 +121,7 @@ if (cabinaMov) paginaLCD = 0;
 // 6. Iluminación: cada ciclo, respuesta rápida ante cambios bruscos
 
 controlIluminacion();
-
-}
-
+```
 Cabe destacar un criterio de seguridad relevante: en el estado de EMERGENCIA se inhibe la lectura de pulsadores y del mando IR. De este modo, ante una manipulación anómala del panel de llamadas durante una situación excepcional, las pulsaciones no se incorporan a la cola de solicitudes. El control de iluminación, por el contrario, permanece operativo en todos los estados, al no incidir sobre la seguridad del sistema.
 
 ## Máquina de estados del ascensor
@@ -155,7 +149,7 @@ El comportamiento del ascensor se modela mediante una máquina de estados finita
 ### Función de transición de estados
 
 La gestión de las transiciones se centraliza en la función transicionEstado(), responsable tanto de las acciones de salida del estado actual como de las acciones de entrada al nuevo estado. Esta centralización evita la duplicación de lógica a lo largo del código y facilita la reinicialización de los temporizadores globales (tPuertaAbierta, tPuertaCerrada y tEmergencia) en el punto adecuado del flujo:
-
+```C++
 void transicionEstado(EstadoAscensor nuevoEstado) {
 
 // Acciones de salida del estado actual
@@ -188,8 +182,6 @@ break;
 
 default: break;
 
-}
-
 EstadoAscensor estadoPrevio = estadoAscensor;
 
 estadoAscensor = nuevoEstado;
@@ -217,17 +209,13 @@ actualizarLCD();
 break;
 
 /* ... resto de estados ... */
-
-}
-
-}
-
+```
 En la transición a REPOSO se reinicializan tanto la dirección de marcha como la velocidad del controlador difuso. Esta última reinicialización es necesaria para evitar que el primer ciclo del desplazamiento siguiente herede la velocidad del viaje anterior; en caso contrario, el controlador difuso calcularía un incremento angular no representativo de un arranque desde reposo.
 
 ### Lógica del estado MOVIMIENTO
 
 El estado MOVIMIENTO concentra tres responsabilidades funcionales: el recálculo del destino mediante el algoritmo SCAN, el accionamiento del servomotor a través del controlador difuso y la supervisión de las condiciones de emergencia. El siguiente fragmento corresponde a la rama del switch principal asociada a dicho estado:
-
+```C++
 case ASCENSOR_MOVIMIENTO:
 
 // Recalcular prioridad con validación de redirección coherente
@@ -252,11 +240,7 @@ velocidadActual = 0.0f; // reset parcial para nuevo perfil fuzzy
 
 Serial.print(F("[SCAN] Redirigiendo hacia P"));
 
-Serial.println(plantaDestino);
-
-}
-
-}
+Serial.println(plantaDestino);}
 
 // Movimiento del servo cada SERVO_INTERVALO (65 ms)
 
@@ -264,9 +248,7 @@ if (ahora - tUltimoServo >= SERVO_INTERVALO) {
 
 tUltimoServo = ahora;
 
-moverAscensor();
-
-}
+moverAscensor(); }
 
 // Llegada a destino
 
@@ -274,20 +256,16 @@ if (plantaActual == plantaDestino && !cabinaMov) {
 
 eliminarSolicitud(plantaActual);
 
-transicionEstado(ASCENSOR_PUERTA_ABIERTA);
-
-}
+transicionEstado(ASCENSOR_PUERTA_ABIERTA); }
 
 // Detección de emergencia (3 condiciones simultáneas)
 
 if (presencia && contarBotonesPulsados() > 1) {
 
-transicionEstado(ASCENSOR_EMERGENCIA);
-
-}
+transicionEstado(ASCENSOR_EMERGENCIA); }
 
 break;
-
+```
 Un criterio de diseño esencial es la prohibición de invertir el sentido de marcha durante el estado MOVIMIENTO. En las versiones iniciales (v4.0 y v4.1), la función calcularPrioridad() modificaba directamente la variable direccionActual como efecto colateral, lo que originaba oscilaciones de la cabina entre dos plantas próximas al destino. La corrección, introducida en la versión v4.3, traslada dicha decisión de forma exclusiva a la transición PUERTA_CERRADA → MOVIMIENTO; durante el movimiento únicamente se admiten redirecciones consistentes con la dirección actual y situadas físicamente entre la planta actual y el destino.
 
 ## Sistema de cola de solicitudes y algoritmo SCAN
@@ -297,7 +275,7 @@ El algoritmo SCAN ---también denominado elevator algorithm en la literatura, pr
 ### Estructura de datos de la cola
 
 La implementación del algoritmo SCAN requiere conocer las plantas con solicitudes pendientes y, como criterios secundarios de desempate, el instante de la primera pulsación (antigüedad) y el número de pulsaciones acumuladas por planta (demanda). A tal efecto se definen tres vectores paralelos de tamaño cinco:
-
+```C++
 #define MAX_PLANTAS 5
 
 bool solicitudes[MAX_PLANTAS] = {false, false, false, false, false};
@@ -311,9 +289,9 @@ uint8_t numSolicitudes = 0;
 enum DireccionAscensor { DIR_NINGUNA, DIR_SUBIENDO, DIR_BAJANDO };
 
 DireccionAscensor direccionActual = DIR_NINGUNA;
-
+```
 La recepción de una pulsación ---procedente del PCF8574 o del mando IR--- invoca agregarSolicitud(), que marca la planta como pendiente, actualiza el contador y, en la primera pulsación, registra el instante asociado. Al alcanzar el destino se invoca eliminarSolicitud(), que libera la entrada correspondiente:
-
+```C++
 void agregarSolicitud(uint8_t planta) {
 
 if (planta < 1 || planta > MAX_PLANTAS) return;
@@ -326,16 +304,12 @@ solicitudes[idx] = true;
 
 tiempoSolicitud[idx] = millis();
 
-numSolicitudes++;
-
-}
+numSolicitudes++; }
 
 // Saturar en 255 para evitar overflow del uint8_t
 
-if (contadorSolicitudes[idx] < 255) contadorSolicitudes[idx]++;
-
-}
-
+if (contadorSolicitudes[idx] < 255) contadorSolicitudes[idx]++; }
+```
 Se incorpora una protección frente a desbordamiento (corrección v4.4): el contador es de tipo uint8_t y, sin saturación, una eventual pulsación número 256 lo desbordaría a cero, invirtiendo la prioridad asignada a una planta de alta demanda. La saturación en 255 elimina por completo este modo de fallo.
 
 ### Función calcularPrioridad()
@@ -345,7 +319,7 @@ Se incorpora una protección frente a desbordamiento (corrección v4.4): el cont
 *Figura 5. Flujo del algoritmo SCAN implementado en calcularPrioridad(). Las fases 1 y 2 corresponden a la búsqueda en la dirección actual y opuesta respectivamente; con carácter previo se evalúa la solicitud en la planta actual.*
 
 La función calcularPrioridad() devuelve la planta de destino. En la versión v4.3 se rediseñó para eliminar comportamientos indeseados de versiones anteriores ---modificación de la dirección como efecto colateral y priorización deficiente de la planta actual--- y garantizar un flujo determinista. Su estructura, ya con las correcciones aplicadas, es la siguiente:
-
+```C++
 uint8_t calcularPrioridad() {
 
 if (numSolicitudes == 0) return 0;
@@ -380,15 +354,11 @@ bool enDir = false;
 
 if (direccionActual == DIR_SUBIENDO || direccionActual == DIR_NINGUNA) {
 
-if (p > plantaActual) { dist = p - plantaActual; enDir = true; }
-
-}
+if (p > plantaActual) { dist = p - plantaActual; enDir = true; } }
 
 if (!enDir && (direccionActual == DIR_BAJANDO || direccionActual == DIR_NINGUNA)) {
 
-if (p < plantaActual) { dist = plantaActual - p; enDir = true; }
-
-}
+if (p < plantaActual) { dist = plantaActual - p; enDir = true; } }
 
 if (!enDir) continue;
 
@@ -406,11 +376,7 @@ mejorDistancia = dist;
 
 mejorContador = contadorSolicitudes[i];
 
-mejorTiempo = tiempoSolicitud[i];
-
-}
-
-}
+mejorTiempo = tiempoSolicitud[i]; }
 
 // FASE 2: si no había nada en la dirección actual, mirar en la opuesta
 
@@ -423,15 +389,13 @@ if (mejorPlanta == 0) {
 }
 
 return mejorPlanta;
-
-}
-
+```
 La jerarquía de los criterios de prioridad es determinante: en primer lugar la distancia (la proximidad de la planta determina su prioridad, conforme al criterio SCAN), en segundo lugar el contador de demanda y, finalmente, la antigüedad de la solicitud. Este último criterio previene la inanición de una planta cuya solicitud quedaría indefinidamente pospuesta ante la llegada de solicitudes más recientes con mayor prioridad por distancia.
 
 ### Validación de redirecciones
 
 La función esRedireccionValida() actúa como salvaguarda de las redirecciones durante el estado MOVIMIENTO. Introducida en la versión v4.2, su finalidad es impedir cambios de destino carentes de coherencia física ---por ejemplo, hacia una planta ya rebasada---. En la versión v4.3 se reforzó el criterio, admitiendo durante el movimiento exclusivamente paradas intermedias coherentes con la dirección actual:
-
+```C++
 bool esRedireccionValida(uint8_t nuevaPlanta) {
 
 if (nuevaPlanta < 1 || nuevaPlanta > MAX_PLANTAS) return false;
@@ -455,9 +419,7 @@ if (direccionActual == DIR_BAJANDO)
 return (nuevaPlanta < plantaActual && nuevaPlanta > plantaDestino);
 
 return false;
-
-}
-
+```
 A modo de ejemplo, en un desplazamiento descendente de P5 a P1, una solicitud de P3 emitida durante el trayecto es aceptada por esRedireccionValida(), de modo que el algoritmo SCAN establece P3 como destino intermedio. Por el contrario, una solicitud de P4 emitida cuando la cabina ya ha descendido por debajo de dicha planta es rechazada como redirección y queda pendiente para la siguiente ronda de servicio. Este comportamiento es el característico de un ascensor real.
 
 ## Control difuso (fuzzy logic) del movimiento del servo
@@ -501,7 +463,7 @@ La interpretación física de las reglas es directa: a distancia elevada y veloc
 ### Función de fuzzificación trapezoidal
 
 El grado de pertenencia de un valor a un conjunto trapezoidal se calcula mediante la siguiente función. El conjunto queda definido por cuatro puntos (a, b, c, d) que delimitan el soporte y el núcleo del trapecio:
-
+```C++
 float fuzzificarTrapezoidal(float x, float a, float b, float c, float d) {
 
 // Se emplean los operadores < / > en los extremos (no <= / >=). Es relevante:
@@ -521,13 +483,11 @@ if (x >= b && x <= c) return 1.0f;
 if (x > a && x < b) return (x - a) / (b - a);
 
 return (d - x) / (d - c);
-
-}
-
+```
 ### Inferencia y defuzzificación
 
 El método de inferencia es Mamdani, con la conjunción AND implementada como operador mínimo. La defuzzificación se realiza por media ponderada de singletones, método de bajo coste computacional especialmente adecuado para microcontroladores, al no requerir el cálculo de áreas:
-
+```C++
 float controlFuzzy(float distancia, float velocidad) {
 
 // --- FASE 1: Fuzzificación de las entradas ---
@@ -577,9 +537,7 @@ float delta = (den > 0.001f) ? (num / den) : FUZZY_OUT_MUY_LENTO;
 if (delta > FUZZY_VEL_MAX) delta = FUZZY_VEL_MAX;
 
 return delta;
-
-}
-
+```
 Esta función se invoca desde moverAscensor() con un periodo de SERVO_INTERVALO (65 ms en la presente configuración, equivalente a unas 15 actualizaciones por segundo). El valor devuelto se suma o resta al ángulo actual del servomotor en función del sentido de marcha, aplicando una limitación (clamping) estricta al rango [0°, 180°] para impedir que el servomotor exceda sus límites físicos.
 
 ## Control PID de la temperatura
@@ -606,7 +564,7 @@ La ecuación de control adopta la forma canónica: u(t) = Kp · e(t) + Ki · ∫
 ### Implementación
 
 La función controlTemperatura() presenta una implementación directa. Los aspectos de mayor relevancia son, en primer lugar, el cálculo de dt en segundos a partir de millis(), necesario para conferir significado físico a las ganancias Ki y Kd, y, en segundo lugar, la saturación del término integral mediante constrain(), que previene el fenómeno de integral windup:
-
+```C++
 void controlTemperatura() {
 
 unsigned long ahora = millis();
@@ -629,9 +587,7 @@ digitalWrite(PIN_EV_FRIO, LOW);
 
 digitalWrite(PIN_EV_CALOR, LOW);
 
-return; // no se actualiza el integrador
-
-}
+return; } // no se actualiza el integrador
 
 // 2) PID activo
 
@@ -663,12 +619,8 @@ digitalWrite(PIN_EV_FRIO, HIGH); digitalWrite(PIN_EV_CALOR, LOW);
 
 accionTemp = REPOSO_TEMP;
 
-digitalWrite(PIN_EV_FRIO, LOW); digitalWrite(PIN_EV_CALOR, LOW);
-
-}
-
-}
-
+digitalWrite(PIN_EV_FRIO, LOW); digitalWrite(PIN_EV_CALOR, LOW); }
+```
 La incorporación del mecanismo anti-windup resulta determinante para la estabilidad del lazo. En ausencia de saturación del integrador, una diferencia inicial elevada entre la temperatura medida y la consigna ---por ejemplo, 5 °C frente a un setpoint de 25 °C--- provoca una acumulación excesiva del término integral mientras la planta responde con lentitud. Al alcanzarse la consigna, dicha acumulación impone un retardo considerable en la descarga del integrador, durante el cual el sistema presenta una sobreoscilación apreciable. La limitación del integrador a ±50 atenúa de forma significativa este comportamiento.
 
 ## Control de iluminación con histéresis
@@ -684,7 +636,7 @@ Los umbrales de operación definidos son los siguientes:
 - Histéresis = ±10 lux, que delimita una zona muerta entre 390 y 410 lux.
 
 El procedimiento divide el rango de 0 a 400 lux en 8 intervalos iguales de 50 lux, cada uno asociado a un LED. Cuanto menor es la iluminancia natural, mayor es el número de intervalos requeridos para alcanzar el umbral y, por tanto, mayor el número de LEDs activados. La expresión aplicada es LEDs = 8 − floor(luz / 50).
-
+```C++
 void controlIluminacion() {
 
 if (luzLux < (LUZ_UMBRAL - LUZ_HISTERESIS)) {
@@ -701,9 +653,7 @@ if (ledsCalculados != ledsEncendidos) {
 
 ledsEncendidos = ledsCalculados;
 
-actualizarLeds(ledsEncendidos);
-
-}
+actualizarLeds(ledsEncendidos); }
 
 } else if (luzLux > (LUZ_UMBRAL + LUZ_HISTERESIS)) {
 
@@ -713,29 +663,21 @@ if (ledsEncendidos > 0) {
 
 ledsEncendidos = 0;
 
-actualizarLeds(ledsEncendidos);
-
-}
-
-}
+actualizarLeds(ledsEncendidos); } }
 
 // Zona muerta (390-410 lux): sin cambios
-
-}
-
+```
 ### Escritura sobre el 74HC595
 
 La transferencia de la máscara de bits al registro de desplazamiento se realiza mediante la función shiftOut() de Arduino, que implementa una transmisión serie por software. La función actualizarLeds() compone la máscara y escribir595() la transfiere al dispositivo:
-
+```C++
 void actualizarLeds(uint8_t cantidad) {
 
 uint8_t mascara = 0;
 
 for (uint8_t i = 0; i < cantidad; i++) mascara |= (1 << i);
 
-escribir595(mascara);
-
-}
+escribir595(mascara); }
 
 void escribir595(uint8_t valor) {
 
@@ -743,10 +685,8 @@ digitalWrite(PIN_595_LATCH, LOW); // bajar latch
 
 shiftOut(PIN_595_DATA, PIN_595_CLOCK, MSBFIRST, valor);
 
-digitalWrite(PIN_595_LATCH, HIGH); // subir latch → publica salidas
-
-}
-
+digitalWrite(PIN_595_LATCH, HIGH); } // subir latch → publica salidas
+```
 ## Control de acceso restringido a la Planta 5 (RFID)
 
 El sistema incorpora un subsistema de control de acceso a la quinta planta basado en tarjetas RFID. El lector empleado es un MFRC522, conectado al bus SPI compartido con la unidad de control. El principio de funcionamiento es el siguiente: por defecto, la llamada a P5 ---tanto desde el pulsador físico del PCF8574 como desde el mando IR--- se encuentra inhibida; al presentar una tarjeta cuyo UID figura en la lista blanca, el acceso a la quinta planta se habilita durante 15 segundos, transcurridos los cuales se restablece automáticamente la restricción. Si el usuario ha registrado la llamada a P5 dentro de dicho intervalo, el ascensor completa el trayecto aunque el periodo de autorización expire durante el desplazamiento: la autorización gobierna el derecho a encolar la solicitud, no su permanencia en la cola.
@@ -754,7 +694,7 @@ El sistema incorpora un subsistema de control de acceso a la quinta planta basad
 ### Lista blanca de tarjetas
 
 Cada tarjeta MIFARE Classic 1K dispone de un UID de 4 bytes. La lista blanca se almacena como un vector bidimensional de bytes:
-
+```C++
 #define NUM_TARJETAS_REG 9
 
 const byte TARJETAS_AUTORIZADAS[NUM_TARJETAS_REG][10] = {
@@ -768,13 +708,11 @@ const byte TARJETAS_AUTORIZADAS[NUM_TARJETAS_REG][10] = {
 {0x01, 0x02, 0x03, 0x04}, // Blue Card
 
 /* ... resto de tarjetas ... */
-
-};
-
+```
 ### Función gestionarAccesoP5()
 
 Esta función se invoca desde el bucle principal con un periodo de 200 ms. Sus responsabilidades son la comprobación de la expiración del periodo de autorización, la detección de tarjetas, la comparación del UID con la lista blanca y, en su caso, la habilitación del acceso:
-
+```C++
 void gestionarAccesoP5() {
 
 unsigned long ahora = millis();
@@ -788,8 +726,6 @@ accesoP5Habilitado = false;
 Serial.println(F("[ACCESO P5] Tiempo expirado. Acceso restringido."));
 
 // Si el usuario ya encoló P5, la solicitud no se elimina.
-
-}
 
 // 2. Detectar tarjeta nueva
 
@@ -809,18 +745,14 @@ Serial.println(F("[ACCESO P5] Tarjeta AUTORIZADA. P5 habilitada 15 s."));
 
 } else {
 
-Serial.println(F("[ACCESO P5] Tarjeta NO autorizada."));
-
-}
+Serial.println(F("[ACCESO P5] Tarjeta NO autorizada.")); }
 
 mfrc522.PICC_HaltA();
 
-mfrc522.PCD_StopCrypto1();
-
-}
-
+mfrc522.PCD_StopCrypto1(); }
+```
 La inhibición de la llamada a P5 se aplica tanto en leerPulsadores() como en leerIR(), mediante una verificación previa a la inserción de la solicitud en la cola:
-
+```C++
 // Dentro de leerPulsadores() / leerIR(), antes de encolar la planta 5:
 
 if (plantaSolicitada == 5) {
@@ -829,14 +761,10 @@ if (!accesoP5Habilitado) {
 
 Serial.println(F("[ACCESO P5] DENEGADO: se requiere tarjeta RFID autorizada"));
 
-continue; // no se encola la solicitud
-
-}
-
-}
+continue; } // no se encola la solicitud
 
 agregarSolicitud(plantaSolicitada);
-
+```
 Se ha adoptado deliberadamente el criterio de completar el trayecto en curso aunque el periodo de autorización expire durante el mismo. Una vez iniciado el desplazamiento hacia P5, la interrupción del servicio a mitad de trayecto carecería de sentido funcional: el control de acceso tiene por finalidad regular la admisión de nuevas llamadas, no la interrupción de viajes ya iniciados.
 
 ## Funciones auxiliares relevantes
@@ -844,36 +772,28 @@ Se ha adoptado deliberadamente el criterio de completar el trayecto en curso aun
 ### determinarPlantaDesdeAngulo() con histéresis
 
 Esta función determina la planta en la que se encuentra físicamente la cabina a partir del ángulo actual del servomotor. La dificultad reside en que, durante el movimiento, el ángulo recorre valores intermedios y la planta lógica podía adelantarse al destino, abriendo un intervalo en el que se cumplía plantaActual == plantaDestino sin que el servomotor hubiese alcanzado aún su posición. La versión v4.3 introduce histéresis: plantaActual se actualiza únicamente si el servomotor se halla dentro de ±10° del ángulo nominal de una planta; en las zonas de tránsito conserva el valor anterior:
-
+```C++
 uint8_t determinarPlantaDesdeAngulo(int angulo) {
 
 for (uint8_t i = 0; i < MAX_PLANTAS; i++) {
 
 if (abs(angulo - ANGULO_PLANTA[i]) <= UMBRAL_LLEGADA_PLANTA) {
 
-return i + 1; // dentro de la zona de la planta i
-
-}
-
-}
+return i + 1; } // dentro de la zona de la planta i
 
 return plantaActual; // zona de tránsito: conservar la anterior
-
-}
-
+```
 ### Filtrado anti-rebote de los pulsadores
 
 La lectura de los cinco pulsadores se efectúa a través del expansor PCF8574 sobre bus I²C. Para mitigar los rebotes mecánicos se implementa un filtro anti-rebote temporal basado en millis(): cada variación de la lectura respecto a la anterior reinicia un temporizador, y una transición sólo se considera válida si se mantiene estable durante al menos DEBOUNCE_MS (25 ms). Asimismo, únicamente se procesan los flancos de pulsación (nivel LOW por resistencia de pull-up), descartando los de liberación para evitar inserciones duplicadas en la cola:
-
+```C++
 void leerPulsadores() {
 
 uint8_t estadoActual = pcf8574_read();
 
 if (estadoActual != ultimaLectura) {
 
-ultimoCambio = millis(); // hubo un cambio: resetear timer
-
-}
+ultimoCambio = millis(); } // hubo un cambio: resetear timer
 
 ultimaLectura = estadoActual;
 
@@ -895,26 +815,14 @@ uint8_t plantaSolicitada = i + 1;
 
 // Validación RFID si es P5...
 
-agregarSolicitud(plantaSolicitada);
-
-}
-
-}
-
-}
-
+agregarSolicitud(plantaSolicitada); }
+.....
 estadoAnterior = estadoActual;
-
-}
-
-}
-
-}
-
+```
 ### Lectura del LDR y conversión a lux
 
 El sensor LDR proporciona una lectura analógica comprendida entre 0 y 1023. La conversión a lux se realiza en dos etapas: en primer lugar se obtiene la resistencia del LDR a partir del divisor de tensión del módulo (resistencia serie de 2 kΩ); a continuación se aplica la ecuación característica logarítmica del sensor (R_L10 = 50 kΩ a 10 lux, γ = 0.7):
-
+```C++
 float leerLux() {
 
 int analogValue = analogRead(PIN_LDR);
@@ -929,14 +837,12 @@ float resistance = 2000 * voltage / (1 - voltage / 5.0);
 
 float lux = pow(RL10 * 1e3 * pow(10, GAMMA) / resistance, (1 / GAMMA));
 
-return lux;
-
-}
-
+return lux; }
+```
 ### Refresco del display LCD
 
 El display LCD I²C 16×2 presenta dos pantallas alternadas con un periodo de 2 segundos. La pantalla 0 indica la planta actual y el estado de ocupación de la cabina (señal del sensor PIR); la pantalla 1 muestra la temperatura, la humedad, la iluminancia y la acción de climatización en curso. Durante el desplazamiento se fuerza la pantalla 0, de modo que el usuario disponga en todo momento de la información de estado de la cabina:
-
+```C++
 void actualizarLCD() {
 
 lcd.clear();
@@ -955,9 +861,7 @@ lcd.print(plantaDestino);
 
 } else {
 
-lcd.print(F("En planta ")); lcd.print(plantaActual);
-
-}
+lcd.print(F("En planta ")); lcd.print(plantaActual); }
 
 lcd.setCursor(0, 1);
 
@@ -980,11 +884,7 @@ lcd.print(F("L:")); lcd.print((int)luzLux); lcd.print(F("lux "));
 if (accionTemp == ENFRIAR) lcd.print(F("ENFRIAR"));
 
 if (accionTemp == CALENTAR) lcd.print(F("CALDEAR"));
-
-}
-
-}
-
+```
 ## Evolución del firmware y correcciones aplicadas
 
 Dada la complejidad del sistema, el firmware ha experimentado una evolución a lo largo de varias versiones. Se documenta a continuación dicha evolución, por cuanto las correcciones introducidas constituyen la base de la robustez del sistema y reflejan los principales problemas de diseño abordados.

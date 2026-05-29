@@ -20,11 +20,11 @@ Esta memoria documenta exclusivamente el subsistema software. Se describen la ar
 
 Con carácter previo a la descripción de la lógica de control, se relacionan los periféricos que intervienen en el sistema. La Figura 1 muestra el montaje completo implementado en Wokwi y la Figura 2 representa la arquitectura por bloques del sistema, diferenciando las entradas de las salidas gestionadas por el firmware.
 
-![](media/image1.png)
+![](media/image4.png)
 
 *Figura 1. Captura del montaje completo en Wokwi (Arduino UNO + servo + DHT22 + PIR + IR + LDR + 74HC595 + 8 LEDs + pulsadores PCF8574 + LCD I²C + RFID MFRC522).*
 
-![](media/image2.png)
+![](media/image1.png)
 
 *Figura 2. Arquitectura por bloques del sistema. En azul, las entradas (sensores, lector RFID, pulsadores, mando IR); en verde, los actuadores y la interfaz de usuario (servo, LCD, LEDs y electroválvulas).*
 

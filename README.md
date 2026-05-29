@@ -180,6 +180,59 @@ salida del estado actual como de las acciones de entrada al nuevo estado.
   <small><em>Figura 4. Máquina de estados del ascensor con sus transiciones principales.</em></small>
 </p>
 
+Los comentarios de cabecera del fichero `main.cpp` recogen la descripción funcional
+completa de la FSM, incluyendo el diagrama ASCII de transiciones empleado durante el
+desarrollo:
+
+> ```text
+>  LÓGICA DE CONTROL DEL ASCENSOR — Máquina de Estados Finitos
+>  ============================================================
+>  El ascensor se modela como una FSM (Finite State Machine) con
+>  6 estados bien definidos:
+>
+>    REPOSO         → Cabina detenida en una planta, esperando órdenes.
+>                     Se aceptan comandos de pulsadores e IR.
+>    PUERTA_CERRADA → [MODIFICACIÓN v3.0] Transición de seguridad antes
+>                     de iniciar el movimiento. Permite 2 s para que
+>                     la puerta se cierre completamente.
+>    MOVIMIENTO     → Cabina desplazándose hacia la planta destino.
+>                     El servo se controla mediante lógica difusa (fuzzy)
+>                     que genera un perfil de velocidad realista:
+>                     arranque progresivo, crucero estable y frenado suave.
+>                     Durante el movimiento se pueden añadir nuevas
+>                     solicitudes; el algoritmo SCAN recalcula el
+>                     destino prioritario dinámicamente.
+>    PUERTA_ABIERTA → La cabina llegó al destino y permanece 3 s con
+>                     "puerta abierta" antes de pasar a PUERTA_CERRADA.
+>    EMERGENCIA     → Parada de seguridad. Se activa ÚNICAMENTE cuando
+>                     se cumplen simultáneamente TRES condiciones:
+>                       1. Ascensor en estado MOVIMIENTO.
+>                       2. Sensor PIR detecta presencia en el exterior.
+>                       3. Más de un pulsador está pulsado a la vez
+>                          (situación de pánico o manipulación anómala
+>                          del panel de llamada).
+>                     La combinación de presencia exterior + múltiples
+>                     pulsaciones simultáneas durante el movimiento se
+>                     interpreta como una situación de riesgo real.
+>                     Tras 10 s hace reset automático a REPOSO.
+>    MANTENIMIENTO  → Estado especial para diagnóstico/debug.
+>
+>  Diagrama de transiciones v4.2:
+>
+>   [REPOSO] ──(nueva solicitud)──► [PUERTA_CERRADA] ──(2 s)──► [MOVIMIENTO]
+>      ▲                              │                              │
+>      │         (llegó destino)      │                              │
+>      │◄──[PUERTA_ABIERTA]◄──────────┘                              │
+>      │         (3 s)                                               │
+>      │                                                             │
+>      └◄──[EMERGENCIA]◄──(mvto + presencia + >1 botón) ─────────────┘
+>               (reset 10 s)
+>
+>  Fuentes de comando: pulsadores (PCF8574 P0-P4) y mando IR NEC.
+>  Los comandos se encolan en cualquier estado excepto EMERGENCIA.
+> ```
+> *— extracto de `firmware/main.cpp` (líneas 38–83)*
+
 La transición a EMERGENCIA requiere la concurrencia simultánea de tres condiciones:
 cabina en movimiento, detección de presencia por el sensor PIR y más de un pulsador
 activo a la vez. La temporización del bucle principal garantiza que ninguna de estas
@@ -237,6 +290,49 @@ sentido, invertir la dirección.
   <img src="media/Picture05.png" width="70%"><br>
   <small><em>Figura 5. Flujo del algoritmo SCAN implementado en <code>calcularPrioridad()</code>.</em></small>
 </p>
+
+La cabecera del fichero `main.cpp` documenta la estructura de datos y los criterios
+de prioridad del algoritmo, así como las reglas de redirección dinámica durante el
+movimiento:
+
+> ```text
+>  SISTEMA DE COLA MÚLTIPLE Y ALGORITMO DE PRIORIDAD SCAN v4.2
+>  ============================================================
+>  El usuario puede pulsar tantas plantas como desee, incluso con
+>  el ascensor en movimiento. Las solicitudes se gestionan mediante:
+>
+>    · Array booleano solicitudes[5]        → indica plantas pendientes.
+>    · Array contadorSolicitudes[5]         → número de pulsaciones
+>      acumuladas por planta (criterio de prioridad secundario).
+>    · Array tiempoSolicitud[5]             → timestamp de la primera
+>      pulsación de cada planta (criterio de prioridad terciario).
+>    · Dirección actual (DIR_SUBIENDO / DIR_BAJANDO / DIR_NINGUNA).
+>
+>  Algoritmo de prioridad (SCAN):
+>    1. Buscar solicitudes en la dirección actual de marcha.
+>       Se prioriza la menor distancia al piso actual.
+>    2. Si hay empate en distancia, gana la planta con mayor número
+>       de solicitudes acumuladas (contadorSolicitudes).
+>    3. Si persiste el empate, gana la planta con mayor tiempo de
+>       espera (tiempoSolicitud más antiguo).
+>    4. Si no hay solicitudes en la dirección actual, invertir
+>       dirección y repetir la búsqueda.
+>    5. Si la única solicitud es la planta actual, se atiende
+>       reabriendo puertas en esa misma planta.
+>
+>  [CORRECCIÓN v4.2] El algoritmo SCAN ahora opera con coherencia
+>  física: durante el movimiento, solo se aceptan redirecciones que
+>  no requieran invertir la marcha bruscamente. Una vez que la cabina
+>  ha pasado una planta, esa solicitud queda pendiente para la
+>  siguiente ronda (comportamiento de ascensor real).
+>
+>  Reglas de redirección durante MOVIMIENTO:
+>    · Si subiendo: solo se aceptan plantas SUPERIORES a la planta actual.
+>    · Si bajando: solo se aceptan plantas INFERIORES a la planta actual.
+>    · Si la nueva planta está en dirección opuesta o ya superada: se ignora
+>      temporalmente (queda en cola para después).
+> ```
+> *— extracto de `firmware/main.cpp` (líneas 85–120)*
 
 La jerarquía de criterios de prioridad es **distancia → contador de demanda →
 antigüedad de la solicitud**:
@@ -309,6 +405,58 @@ velocidad de crucero y frenado gradual en la aproximación a la planta.
   <small><em>Figura 8. Singletones de salida (<code>deltaAngulo</code>) del controlador difuso.</em></small>
 </p>
 
+La cabecera del fichero `main.cpp` documenta los conjuntos difusos, las variables de
+entrada/salida, la base de reglas (9 reglas) y el método de inferencia y
+defuzzificación empleados:
+
+> ```text
+>  CONTROL DIFUSO (FUZZY LOGIC) DE MOVIMIENTO — v4.0 / v4.2
+>  ============================================================
+>  Se sustituye el control de velocidad fija (1°/ciclo) por un
+>  sistema de control difuso que genera un perfil de velocidad
+>  trapezoidal suave, imitando el comportamiento de un ascensor real:
+>
+>    · Arranque progresivo: aceleración suave desde reposo hasta
+>      velocidad de crucero.
+>    · Velocidad estable (crucero): mantenimiento de velocidad
+>      constante en trayectos largos.
+>    · Frenado suave: deceleración progresiva al acercarse al destino.
+>    · Precisión de parada: corrección fina en los últimos grados.
+>
+>  Variables de entrada al controlador difuso:
+>    · distanciaRestante → distancia angular al piso destino (0–180°)
+>    · velocidadActual   → velocidad del ciclo anterior (0–8°/ciclo)
+>
+>  Variable de salida:
+>    · deltaAngulo       → incremento de ángulo para este ciclo (0–6°)
+>
+>  Método de inferencia: Mamdani (min-max) con defuzzificación
+>  por centro de gravedad ponderado (método de los singletones).
+>
+>  Conjuntos difusos de entrada:
+>    · distanciaRestante: CERCA (0–15°), MEDIA (10–45°), LEJOS (35–180°)
+>    · velocidadActual:   LENTA (0–2°), MEDIA (1.5–4.5°), RÁPIDA (4–8°)
+>
+>  Singletones de salida (deltaAngulo):
+>    · MUY_LENTO = 1°, LENTO = 2°, MEDIO = 3°, RÁPIDO = 5°, MUY_RÁPIDO = 6°
+>
+>  Reglas principales (9 reglas):
+>    1. Si distancia=CERCA  Y velocidad=LENTA   → MUY_LENTO  (precisión)
+>    2. Si distancia=CERCA  Y velocidad=MEDIA   → MUY_LENTO  (frenado)
+>    3. Si distancia=CERCA  Y velocidad=RÁPIDA  → LENTO      (frenado suave)
+>    4. Si distancia=MEDIA  Y velocidad=LENTA   → MEDIO      (aceleración)
+>    5. Si distancia=MEDIA  Y velocidad=MEDIA   → RÁPIDO     (crucero)
+>    6. Si distancia=MEDIA  Y velocidad=RÁPIDA  → LENTO      (frenado)
+>    7. Si distancia=LEJOS  Y velocidad=LENTA   → RÁPIDO     (arranque)
+>    8. Si distancia=LEJOS  Y velocidad=MEDIA   → RÁPIDO     (crucero)
+>    9. Si distancia=LEJOS  Y velocidad=RÁPIDA  → MUY_RÁPIDO (máx. velocidad)
+>
+>  El controlador se ejecuta en cada ciclo de servo (65 ms) dentro de
+>  moverAscensor(), calculando dinámicamente el incremento óptimo en
+>  función del estado actual del sistema.
+> ```
+> *— extracto de `firmware/main.cpp` (líneas 201–245)*
+
 La base de reglas (9 reglas) se evalúa con la conjunción AND implementada como
 operador mínimo, y la defuzzificación se realiza por **media ponderada de
 singletones** —método de bajo coste computacional especialmente adecuado para
@@ -371,6 +519,63 @@ una banda muerta para el accionamiento ON/OFF de las válvulas:
 | `TEMP_ZONA_M`|  3.0 °C  | Zona muerta del error                        |
 | `PID_INTERVALO`| 500 ms | Periodo de ejecución del lazo                |
 
+La cabecera del fichero `main.cpp` explica la ecuación del controlador, la acción de
+cada uno de sus tres términos y la conversión de la salida continua a actuación
+discreta sobre las electroválvulas:
+
+> ```text
+>  LÓGICA DE CONTROL DE TEMPERATURA — Controlador PID
+>  ============================================================
+>  Objetivo: mantener la temperatura interior en TEMP_SETPOINT = 25 °C
+>  actuando sobre la electroválvula de frío (EV_FRIO, LED azul, pin 10)
+>  y la de calor (EV_CALOR, LED rojo, pin 12).
+>
+>  El controlador PID (Proporcional–Integral–Derivativo) es el algoritmo
+>  de control realimentado más utilizado en la industria. Calcula la
+>  señal de control u(t) a partir del error entre el valor deseado
+>  (setpoint) y el valor medido (tempMedida) por el sensor DHT22:
+>
+>    error(t)  =  TEMP_SETPOINT − tempMedida
+>
+>    u(t)  =  Kp · e(t)
+>           + Ki · ∫₀ᵗ e(τ) dτ          ← suma acumulada × Δt
+>           + Kd · Δe(t)/Δt             ← diferencia / Δt
+>
+>  Acción de cada término:
+>    · Proporcional (Kp = 2.0):
+>        Genera una respuesta inmediata y proporcional al error actual.
+>        A mayor diferencia entre setpoint y temperatura, mayor señal.
+>        Por sí solo puede dejar un error estacionario residual.
+>
+>    · Integral (Ki = 0.05):
+>        Acumula el error a lo largo del tiempo. Aunque el error sea
+>        pequeño, si persiste el integrador sigue creciendo hasta
+>        eliminar el error estacionario por completo.
+>        Se limita con anti-windup (±PID_INT_MAX = ±50) para evitar
+>        que se sature cuando las válvulas llevan mucho tiempo activas
+>        y el sistema no puede responder más rápido.
+>
+>    · Derivativo (Kd = 1.0):
+>        Reacciona a la velocidad de cambio del error. Si la temperatura
+>        se acerca rápidamente al setpoint, el término derivativo genera
+>        una acción opuesta que frena la sobreoscilación (efecto amortiguador).
+>
+>  Como las válvulas son ON/OFF (no modulables), la salida continua u(t)
+>  se convierte en acción discreta mediante una banda muerta (±PID_DEADBAND):
+>
+>    u(t) >  +PID_DEADBAND  →  CALENTAR  (EV_CALOR HIGH, EV_FRIO LOW)
+>    u(t) <  −PID_DEADBAND  →  ENFRIAR   (EV_FRIO HIGH, EV_CALOR LOW)
+>    |u(t)| ≤ PID_DEADBAND  →  REPOSO    (ambas válvulas LOW)
+>
+>  La banda muerta evita micro-ciclos de las válvulas cuando la
+>  temperatura está muy próxima al setpoint.
+>
+>  El PID se ejecuta cada PID_INTERVALO = 500 ms. El sensor DHT22 se
+>  lee cada 2 s; entre lecturas el término derivativo vale 0 y el
+>  controlador actúa fundamentalmente sobre los términos P e I.
+> ```
+> *— extracto de `firmware/main.cpp` (líneas 150–199)*
+
 ```cpp
 void controlTemperatura() {
   unsigned long ahora = millis();
@@ -411,6 +616,39 @@ desplazamiento **74HC595**. El objetivo es mantener la iluminancia próxima a un
 de confort de **500 lux** mediante un **control proporcional inverso con histéresis**
 (±10 lux) que evita la conmutación oscilatoria en torno al umbral:
 
+La cabecera del fichero `main.cpp` describe los parámetros y la regla aplicada en
+cada uno de los tres tramos definidos por la histéresis:
+
+> ```text
+>  LÓGICA DE CONTROL DE ILUMINACIÓN — Control Proporcional Inverso
+>  ============================================================
+>  Objetivo: mantener la iluminación interior próxima a 500 lux
+>  (nivel de confort) usando los 8 LEDs del 74HC595 como fuente
+>  de luz artificial complementaria a la luz natural.
+>
+>  Parámetros:
+>    Setpoint   = 500 lux   (nivel de confort objetivo)
+>    Umbral     = 400 lux   (80 % del setpoint, umbral de activación)
+>    Histéresis = ±10 lux   (zona muerta: 390–410 lux)
+>
+>  Algoritmo (control proporcional inverso discreto con histéresis):
+>
+>    ┌─────────────────────────────────────────────────────────┐
+>    │ luz < 390 lux  →  LEDs = 8 − floor(luz / (400/8))       │
+>    │                   (cuanto menos luz, más LEDs activos)  │
+>    │ luz > 410 lux  →  LEDs = 0  (apagar iluminación artif.) │
+>    │ 390–410 lux    →  sin cambios (zona muerta/histéresis)  │
+>    └─────────────────────────────────────────────────────────┘
+>
+>  La relación es inversa y proporcional: dividiendo el rango de luz
+>  (0–400 lux) en 8 intervalos iguales de 50 lux, se encienden tantos
+>  LEDs como intervalos hayan de luz que "faltan" para llegar al umbral.
+>  La histéresis evita el parpadeo continuo cerca del umbral.
+>  La lectura del LDR se realiza en cada ciclo de loop() para dar
+>  respuesta rápida ante cambios bruscos de iluminación exterior.
+> ```
+> *— extracto de `firmware/main.cpp` (líneas 122–148)*
+
 ```cpp
 void controlIluminacion() {
   if (luzLux < (LUZ_UMBRAL - LUZ_HISTERESIS)) {
@@ -440,6 +678,43 @@ El acceso a la planta 5 está restringido a tarjetas RFID cuyo UID figure en la 
 blanca interna. Al presentar una tarjeta autorizada, el acceso se habilita durante
 **15 segundos**, transcurridos los cuales se restablece automáticamente la
 restricción:
+
+La cabecera del fichero `main.cpp` detalla la especificación funcional completa del
+subsistema, incluyendo la interacción con las dos vías de comando (pulsador físico y
+mando IR) y la independencia respecto a la lógica de movimiento ya en curso:
+
+> ```text
+>  CORRECCIONES v4.4 (Frente a v4.3)
+>  ============================================================
+>  [NUEVO] Control de acceso restringido a la Planta 5 mediante
+>           lector RFID MFRC522 (bus SPI):
+>
+>    a) Planta 5 declarada como zona de acceso restringido.
+>    b) Lector MFRC522 conectado por SPI:
+>         RST → pin 9, SDA(SS) → pin 10, SCK → 13,
+>         MOSI → 11, MISO → 12, 3.3V/GND alimentación.
+>    c) Solo tarjetas cuyo UID esté en la lista blanca
+>       TARJETAS_AUTORIZADAS pueden habilitar el botón de P5.
+>    d) Al presentar una tarjeta válida, se habilita el acceso
+>       a P5 durante 15 segundos (timeout automático).
+>       Transcurrido ese tiempo, el botón P5 vuelve a estar
+>       bloqueado hasta una nueva tarjeta autorizada.
+>    e) Durante el tiempo de desbloqueo, tanto el pulsador
+>       físico (PCF8574 P4) como el botón 5 del mando IR
+>       funcionan con normalidad. Si el acceso está bloqueado,
+>       ambas vías deniegan la solicitud y muestran mensaje
+>       por monitor Serie sin alterar la cola ni el movimiento.
+>    f) La lógica de movimiento (SCAN + Fuzzy) no se altera;
+>       si P5 ya estaba encolada o en trayecto cuando expira
+>       el timeout, el ascensor completa el viaje normalmente.
+>       El bloqueo solo afecta a NUEVAS solicitudes de P5.
+>
+>  Funciones añadidas:
+>    · gestionarAccesoP5()    → lectura cíclica RFID + timeout
+>    · tarjetaAutorizada()    → comparación UID contra lista blanca
+>    · mostrarUID()           → debug del UID leído por Serial
+> ```
+> *— extracto de `firmware/main.cpp` (líneas 374–403)*
 
 ```cpp
 void gestionarAccesoP5() {

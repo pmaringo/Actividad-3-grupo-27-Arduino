@@ -10,8 +10,8 @@
  * Autor: Pablo Marín
  * Fecha: 11 Mayo, 2026 
  * ============================================================
- * MODIFICACIÓN v4.1 - Control Difuso (Fuzzy Logic) de Movimiento
- *                     (CORRECCIÓN de parada prematura y bucle SCAN)
+ * MODIFICACIÓN v4.2 - Control Difuso (Fuzzy Logic) de Movimiento
+ *                     (CORRECCIÓN de redirección SCAN + clamping servo)
  * ============================================================
  *  Hardware utilizado:
  *   - Arduino Uno
@@ -32,157 +32,67 @@
  *  6 estados bien definidos:
  *
  *    REPOSO         → Cabina detenida en una planta, esperando órdenes.
- *                     Se aceptan comandos de pulsadores e IR.
- *    PUERTA_CERRADA → Transición de seguridad antes
- *                     de iniciar el movimiento. Permite 2 s para que
- *                     la puerta se cierre completamente.
- *    MOVIMIENTO     → Cabina desplazándose hacia la planta destino.
- *                     El servo se controla mediante lógica difusa (fuzzy)
- *                     que genera un perfil de velocidad realista:
- *                     arranque progresivo, crucero estable y frenado suave.
- *                     Durante el movimiento se pueden añadir nuevas
- *                     solicitudes; el algoritmo SCAN recalcula el
- *                     destino prioritario dinámicamente.
- *    PUERTA_ABIERTA → La cabina llegó al destino y permanece 3 s con
- *                     "puerta abierta" antes de pasar a PUERTA_CERRADA.
- *    EMERGENCIA     → Parada de seguridad. Se activa ÚNICAMENTE cuando
- *                     se cumplen simultáneamente TRES condiciones:
- *                       1. Ascensor en estado MOVIMIENTO.
- *                       2. Sensor PIR detecta presencia en el exterior.
- *                       3. Más de un pulsador está pulsado a la vez
- *                          (situación de pánico o manipulación anómala
- *                          del panel de llamada).
- *                     La combinación de presencia exterior + múltiples
- *                     pulsaciones simultáneas durante el movimiento se
- *                     interpreta como una situación de riesgo real.
- *                     Tras 10 s hace reset automático a REPOSO.
+ *    PUERTA_CERRADA → Transición de seguridad antes de iniciar movimiento.
+ *    MOVIMIENTO     → Cabina desplazándose con control difuso (fuzzy).
+ *    PUERTA_ABIERTA → Llegada al destino, 3 s de espera.
+ *    EMERGENCIA     → Parada de seguridad (PIR + >1 botón en movimiento).
  *    MANTENIMIENTO  → Estado especial para diagnóstico/debug.
  *
- *  Diagrama de transiciones v4.1:
+ * ============================================================
+ *  SISTEMA DE COLA MÚLTIPLE Y ALGORITMO DE PRIORIDAD SCAN v4.2
+ * ============================================================
+ *  [CORRECCIÓN v4.2] El algoritmo SCAN ahora opera con coherencia
+ *  física: durante el movimiento, solo se aceptan redirecciones que
+ *  no requieran invertir la marcha bruscamente. Una vez que la cabina
+ *  ha pasado una planta, esa solicitud queda pendiente para la
+ *  siguiente ronda (comportamiento de ascensor real).
  *
- *   [REPOSO] ──(nueva solicitud)──► [PUERTA_CERRADA] ──(2 s)──► [MOVIMIENTO]
- *      ▲                              │                              │
- *      │         (llegó destino)      │                              │
- *      │◄──[PUERTA_ABIERTA]◄──────────┘                              │
- *      │         (3 s)                                               │
- *      │                                                             │
- *      └◄──[EMERGENCIA]◄──(mvto + presencia + >1 botón)─────────────┘
- *               (reset 10 s)
- *
- *  Fuentes de comando: pulsadores (PCF8574 P0-P4) y mando IR NEC.
- *  Los comandos se encolan en cualquier estado excepto EMERGENCIA.
+ *  Reglas de redirección durante MOVIMIENTO:
+ *    · Si subiendo: solo se aceptan plantas SUPERIORES a la actual.
+ *    · Si bajando: solo se aceptan plantas INFERIORES a la actual.
+ *    · Si la nueva planta está en dirección opuesta: se ignora
+ *      temporalmente (queda en cola para después).
  *
  * ============================================================
- *  SISTEMA DE COLA MÚLTIPLE Y ALGORITMO DE PRIORIDAD SCAN v3.0
- * ============================================================
- *  El usuario puede pulsar tantas plantas como desee, incluso con
- *  el ascensor en movimiento. Las solicitudes se gestionan mediante:
- *
- *    · Array booleano solicitudes[5]        → indica plantas pendientes.
- *    · Array contadorSolicitudes[5]         → número de pulsaciones
- *      acumuladas por planta (criterio de prioridad secundario).
- *    · Array tiempoSolicitud[5]           → timestamp de la primera
- *      pulsación de cada planta (criterio de prioridad terciario).
- *    · Dirección actual (DIR_SUBIENDO / DIR_BAJANDO / DIR_NINGUNA).
- *
- *  Algoritmo de prioridad (SCAN):
- *    1. Buscar solicitudes en la dirección actual de marcha.
- *       Se prioriza la menor distancia al piso actual.
- *    2. Si hay empate en distancia, gana la planta con mayor número
- *       de solicitudes acumuladas (contadorSolicitudes).
- *    3. Si persiste el empate, gana la planta con mayor tiempo de
- *       espera (tiempoSolicitud más antiguo).
- *    4. Si no hay solicitudes en la dirección actual, invertir
- *       dirección y repetir la búsqueda.
- *    5. Si la única solicitud es la planta actual, se atiende
- *       reabriendo puertas en esa misma planta.
- *
- * ============================================================
- *  LÓGICA DE CONTROL DE ILUMINACIÓN — Control Proporcional Inverso
- * ============================================================
- *  Objetivo: mantener la iluminación interior próxima a 500 lux
- *  (nivel de confort) usando los 8 LEDs del 74HC595 como fuente
- *  de luz artificial complementaria a la luz natural.
- *
- *  Parámetros:
- *    Setpoint   = 500 lux   (nivel de confort objetivo)
- *    Umbral     = 400 lux   (80 % del setpoint, umbral de activación)
- *    Histéresis = ±10 lux   (zona muerta: 390–410 lux)
- *
- * ============================================================
- *  LÓGICA DE CONTROL DE TEMPERATURA — Controlador PID
- * ============================================================
- *  Objetivo: mantener la temperatura interior en TEMP_SETPOINT = 25 °C
- *  actuando sobre la electroválvula de frío (EV_FRIO, LED azul, pin 10)
- *  y la de calor (EV_CALOR, LED rojo, pin 12).
- *
- * ============================================================
- *  CONTROL DIFUSO (FUZZY LOGIC) DE MOVIMIENTO — v4.1
+ *  CONTROL DIFUSO (FUZZY LOGIC) DE MOVIMIENTO — v4.2
  * ============================================================
  *  Se sustituye el control de velocidad fija (1°/ciclo) por un
  *  sistema de control difuso que genera un perfil de velocidad
- *  trapezoidal suave, imitando el comportamiento de un ascensor real:
+ *  trapezoidal suave, imitando el comportamiento de un ascensor real.
  *
- *    · Arranque progresivo: aceleración suave desde reposo hasta
- *      velocidad de crucero.
- *    · Velocidad estable (crucero): mantenimiento de velocidad
- *      constante en trayectos largos.
- *    · Frenado suave: deceleración progresiva al acercarse al destino.
- *    · Precisión de parada: corrección fina en los últimos grados.
- *
- *  Variables de entrada al controlador difuso:
+ *  Variables de entrada:
  *    · distanciaRestante → distancia angular al piso destino (0–180°)
  *    · velocidadActual   → velocidad del ciclo anterior (0–8°/ciclo)
  *
  *  Variable de salida:
  *    · deltaAngulo       → incremento de ángulo para este ciclo (0–6°)
  *
- *  Método de inferencia: Mamdani (min-max) con defuzzificación
- *  por centro de gravedad ponderado (método de los singletones).
- *
- *  Conjuntos difusos de entrada:
- *    · distanciaRestante: CERCA (0–15°), MEDIA (10–45°), LEJOS (35–180°)
- *    · velocidadActual:   LENTA (0–2°), MEDIA (1.5–4.5°), RÁPIDA (4–8°)
- *
- *  Singletones de salida (deltaAngulo):
- *    · MUY_LENTO = 1°, LENTO = 2°, MEDIO = 3°, RÁPIDO = 5°, MUY_RÁPIDO = 6°
- *
- *  Reglas principales (9 reglas):
- *    1. Si distancia=CERCA  Y velocidad=LENTA   → MUY_LENTO (precisión)
- *    2. Si distancia=CERCA  Y velocidad=MEDIA  → MUY_LENTO (frenado)
- *    3. Si distancia=CERCA  Y velocidad=RÁPIDA  → LENTO    (frenado suave)
- *    4. Si distancia=MEDIA  Y velocidad=LENTA   → MEDIO    (aceleración)
- *    5. Si distancia=MEDIA  Y velocidad=MEDIA   → RÁPIDO   (crucero)
- *    6. Si distancia=MEDIA  Y velocidad=RÁPIDA  → LENTO    (frenado)
- *    7. Si distancia=LEJOS  Y velocidad=LENTA    → RÁPIDO   (arranque)
- *    8. Si distancia=LEJOS  Y velocidad=MEDIA    → RÁPIDO   (crucero)
- *    9. Si distancia=LEJOS  Y velocidad=RÁPIDA  → MUY_RÁPIDO (máx. velocidad)
+ *  Método: Mamdani (min-max) + defuzzificación por media ponderada.
  *
  * ============================================================
- *  CORRECCIONES v4.1 (Frente a v4.0)
+ *  CORRECCIONES v4.2 (Frente a v4.1)
  * ============================================================
- *  [BUG 1] Parada prematura por coincidencia de planta lógica:
- *    En v4.0, moverAscensor() comenzaba con:
- *      if (plantaDestino == plantaActual) { parar; return; }
- *    Como plantaActual se actualizaba por rangos amplios (ej. >=170° = P5),
- *    el ascensor se detenía al entrar en el rango, sin alcanzar el ángulo
- *    exacto de destino (180°, 135°, 90°, etc.).
- *    SOLUCIÓN: Eliminada dicha condición. La ÚNICA condición de parada
- *    válida es anguloServo == destino exacto.
+ *  [BUG 1] Bucle infinito SCAN al redirigir durante movimiento:
+ *    Causa: plantaDestino cambiaba arbitrariamente en cada ciclo,
+ *    pero el servo seguía su inercia. El fuzzy recalculaba desde
+ *    la posición actual generando oscilaciones.
+ *    SOLUCIÓN: Implementado sistema de "commit" de destino. Durante
+ *    el movimiento, solo se aceptan redirecciones en la misma
+ *    dirección de marcha y que no hayan sido superadas. Las
+ *    solicitudes en dirección opuesta quedan en cola para la
+ *    siguiente ronda.
  *
- *  [BUG 2] Bucle infinito SCAN al redirigir durante movimiento:
- *    Al detenerse prematuramente, plantaActual quedaba desfasada del
- *    ángulo real. calcularPrioridad() comparaba una planta lógica
- *    incorrecta contra la cola, generando oscilaciones de destino.
- *    SOLUCIÓN: plantaActual durante el movimiento se calcula ahora
- *    mediante determinarPlantaDesdeAngulo(), que usa redondeo al
- *    múltiplo de 45° más cercano con zona muerta de ±22°. Esto evita
- *    oscilaciones en los límites y mantiene coherencia con la posición
- *    física sin provocar paradas.
+ *  [BUG 2] Servo gira más allá de 180° o en círculos:
+ *    Causa: falta de clamping del ángulo del servo cuando el
+ *    destino cambiaba bruscamente mientras el servo avanzaba.
+ *    SOLUCIÓN: Añadido clamping estricto de anguloServo a [0, 180].
+ *    Además, la dirección de movimiento se recalcula explícitamente
+ *    en cada ciclo comparando anguloServo contra destino real.
  *
- *  [MEJORA] Precisión de parada garantizada:
- *    Cuando distanciaRestante <= 2°, se fuerza delta = 1° exacto,
- *    evitando que el fuzzy deje residuos de distancia por truncamiento.
+ *  [MEJORA] Limpieza de velocidad al cambiar destino:
+ *    Cuando se produce una redirección válida, la velocidadActual
+ *    se resetea parcialmente para permitir un nuevo perfil fuzzy
+ *    desde la posición actual hacia el nuevo destino.
  *
  * ============================================================
  *   - LCD: muestra planta actual, Tª, humedad y acción de control
@@ -204,37 +114,36 @@
 #define PIN_DHT         7
 #define PIN_PIR         8
 #define PIN_LDR        A0
-#define PIN_EV_FRIO     10  // LED azul  → electroválvula refrigerante
-#define PIN_EV_CALOR    12  // LED rojo  → electroválvula calefacción
-#define PIN_595_DATA    6   // Pin de datos serie (DS) del 74HC595
-#define PIN_595_CLOCK   5   // Pin de reloj de desplazamiento (SHCP) del 74HC595
-#define PIN_595_LATCH   4   // Pin de latch (STCP) del 74HC595
+#define PIN_EV_FRIO     10
+#define PIN_EV_CALOR    12
+#define PIN_595_DATA    6
+#define PIN_595_CLOCK   5
+#define PIN_595_LATCH   4
 
-// Direccion I2C del PCF8574 (A0=A1=A2=GND -> 0x20)
+// Direccion I2C del PCF8574
 const uint8_t PCF8574_ADDR = 0x20;
 
-// Pines del PCF8574 donde estan conectados los pulsadores de planta
+// Pines del PCF8574
 const uint8_t BOTON_P0 = 0;
 const uint8_t BOTON_P1 = 1;
 const uint8_t BOTON_P2 = 2;
 const uint8_t BOTON_P3 = 3;
 const uint8_t BOTON_P4 = 4;
 
-// Mascara para los 5 pulsadores (bits 0-4)
 const uint8_t BOTONES_MASK = 0x1F;
 
-// Variables para anti-rebote y deteccion de flanco
+// Anti-rebote
 uint8_t estadoAnterior = 0xFF;
 uint8_t ultimaLectura = 0xFF;
 unsigned long ultimoCambio = 0;
 const unsigned long DEBOUNCE_MS = 25;
 
-// --- Temperatura: Constantes de control ---
+// Temperatura
 #define TEMP_SETPOINT   25.0f
 #define TEMP_ZONA_M      3.0f
 #define HUM_SETPOINT    60.0f
 
-// Parámetros de sintonía del PID
+// PID
 #define PID_KP          2.0f
 #define PID_KI          0.05f
 #define PID_KD          1.0f
@@ -242,7 +151,7 @@ const unsigned long DEBOUNCE_MS = 25;
 #define PID_INT_MAX     50.0f
 #define PID_INTERVALO   500
 
-// Iluminación: valores en lux
+// Iluminación
 #define GAMMA           0.7f
 #define RL10           50.0f
 #define LUZ_SETPOINT    500
@@ -283,29 +192,30 @@ const unsigned long DEBOUNCE_MS = 25;
 #define FUZZY_VEL_RAPIDA_C   8.0f
 #define FUZZY_VEL_RAPIDA_D   8.0f
 
-// Singletones de SALIDA: deltaAngulo (grados por ciclo)
+// Singletones de SALIDA
 #define FUZZY_OUT_MUY_LENTO  1.0f
 #define FUZZY_OUT_LENTO      2.0f
 #define FUZZY_OUT_MEDIO      3.0f
 #define FUZZY_OUT_RAPIDO     5.0f
 #define FUZZY_OUT_MUY_RAPIDO 6.0f
 
-// Velocidad máxima permitida por ciclo (protección)
 #define FUZZY_VEL_MAX        6.0f
-
-// [CORRECCIÓN v4.1] Umbral de distancia para forzar velocidad mínima exacta
 #define FUZZY_DIST_MINIMA    2.0f
 
-// Ángulos del servo para cada planta (0→P1, 180→P5)
+// Límites físicos del servo SG90
+#define SERVO_MIN            0
+#define SERVO_MAX          180
+
+// Ángulos del servo para cada planta
 const int ANGULO_PLANTA[5] = {0, 45, 90, 135, 180};
 
-// Códigos IR NEC — botones 1..5 (mando WOKWI)
+// Códigos IR NEC
 const uint32_t IR_CODIGO[5] = {
   0xCF30FF00, 0xE718FF00, 0x857AFF00, 0xEF10FF00, 0xC738FF00
 };
 
 // ============================================================
-// SISTEMA DE COLA DE SOLICITUDES Y ALGORITMO DE PRIORIDAD SCAN
+// SISTEMA DE COLA DE SOLICITUDES
 // ============================================================
 #define MAX_PLANTAS           5
 #define TIEMPO_CIERRE_PUERTA  2000
@@ -336,20 +246,23 @@ int     anguloServo     = 0;
 float   tempMedida      = 25.0f;
 float   humMedida       = 80.0f;
 float   luzLux          = 500.0f;
-
 bool    presencia       = false;
 
 enum AccionTemp { REPOSO_TEMP, CALENTAR, ENFRIAR };
 AccionTemp accionTemp = REPOSO_TEMP;
 
-float         pidIntegral  = 0.0f;
-float         pidErrorPrev = 0.0f;
-unsigned long tUltimoPID   = 0;
+float pidIntegral  = 0.0f;
+float pidErrorPrev = 0.0f;
+unsigned long tUltimoPID = 0;
 
 // Variables del control difuso
-float         velocidadActual = 0.0f;
+float velocidadActual = 0.0f;
 
-// --- MÁQUINA DE ESTADOS DEL ASCENSOR ---
+// [CORRECCIÓN v4.2] Guardar planta de origen del movimiento actual
+// para determinar qué plantas ya han sido "superadas" físicamente
+uint8_t plantaOrigenMovimiento = 1;
+
+// --- MÁQUINA DE ESTADOS ---
 enum EstadoAscensor {
   ASCENSOR_REPOSO,
   ASCENSOR_PUERTA_CERRADA,
@@ -392,42 +305,65 @@ void agregarSolicitud(uint8_t planta);
 void eliminarSolicitud(uint8_t planta);
 uint8_t calcularPrioridad();
 
-// Prototipos del control difuso
 float fuzzificarTrapezoidal(float x, float a, float b, float c, float d);
 float fuzzificarTriangular(float x, float a, float b, float c);
 float controlFuzzy(float distancia, float velocidad);
-
-// [CORRECCIÓN v4.1] Nuevo prototipo para cálculo robusto de planta
 uint8_t determinarPlantaDesdeAngulo(int angulo);
 
+// [CORRECCIÓN v4.2] Nuevo prototipo para validación de redirección
+bool esRedireccionValida(uint8_t nuevaPlanta);
+
 // ============================================================
-// [CORRECCIÓN v4.1] determinarPlantaDesdeAngulo()
-// -----------------------------------------------------------
-// Calcula la planta lógica correspondiente a un ángulo de servo.
-// En lugar de rangos fijos que causaban paradas prematuras, usa
-// redondeo al múltiplo de 45° más cercano con una zona muerta
-// de ±22° alrededor de cada ángulo de planta.
-//
-// Esto evita que plantaActual oscile cuando el servo está justo
-// en el límite entre dos plantas, y garantiza que la lógica SCAN
-// trabaje sobre una planta de referencia coherente con la posición
-// física real.
-//
-// Mapeo resultante:
-//   0°–22°   → P1
-//   23°–67°  → P2
-//   68°–112° → P3
-//   113°–157°→ P4
-//   158°–180°→ P5
-//
-// @param angulo  Ángulo actual del servo (0–180)
-// @return  Número de planta (1–5)
+// determinarPlantaDesdeAngulo()
+// ------------------------------------------------------------
+// Calcula la planta lógica mediante redondeo al múltiplo de 45°
+// más cercano con zona muerta de ±22°.
 // ============================================================
 uint8_t determinarPlantaDesdeAngulo(int angulo) {
-  int idx = (angulo + 22) / 45;  // división entera, redondeo al más cercano
+  int idx = (angulo + 22) / 45;
   if (idx < 0) idx = 0;
   if (idx > 4) idx = 4;
   return (uint8_t)(idx + 1);
+}
+
+// ============================================================
+// [CORRECCIÓN v4.2] esRedireccionValida()
+// ------------------------------------------------------------
+// Valida si una nueva solicitud de planta puede aceptarse como
+// * redirección durante el movimiento actual.
+//
+// Reglas de coherencia física (ascensor real):
+//   · Si subiendo: solo plantas Estrictamente SUPERIORES a la
+//     planta de origen del movimiento actual.
+//   · Si bajando: solo plantas Estrictamente INFERIORES a la
+//     planta de origen del movimiento actual.
+//   · La planta actual de paso (determinada por ángulo) no
+//     influye: una vez iniciado el movimiento, no se puede
+//     "volver atrás" sin completar la ronda.
+//
+// @param nuevaPlanta  Planta solicitada (1–5)
+// @return  true si la redirección es físicamente válida
+// ============================================================
+bool esRedireccionValida(uint8_t nuevaPlanta) {
+  if (nuevaPlanta < 1 || nuevaPlanta > MAX_PLANTAS) return false;
+  
+  // Si estamos parados, cualquier planta es válida
+  if (!cabinaMov) return true;
+  
+  // Si la nueva planta es la misma que el destino actual, no es redirección
+  if (nuevaPlanta == plantaDestino) return false;
+  
+  // Validar según dirección de marcha del movimiento ACTUAL
+  if (direccionActual == DIR_SUBIENDO) {
+    // Subiendo: solo aceptar plantas superiores al origen del movimiento
+    // (no se puede bajar sin completar la subida actual)
+    return (nuevaPlanta > plantaOrigenMovimiento);
+  } else if (direccionActual == DIR_BAJANDO) {
+    // Bajando: solo aceptar plantas inferiores al origen del movimiento
+    return (nuevaPlanta < plantaOrigenMovimiento);
+  }
+  
+  return true; // DIR_NINGUNA (no debería ocurrir en movimiento)
 }
 
 // ============================================================
@@ -436,25 +372,17 @@ uint8_t determinarPlantaDesdeAngulo(int angulo) {
 void setup() {
   Serial.begin(9600);
 
-  Serial.println(F("UNIR Actividad 2 - Ascensor ACME v4.1"));
-  Serial.println(F("[MOD v4.1] Control Difuso (Fuzzy Logic) - CORREGIDO"));
+  Serial.println(F("UNIR Actividad 2 - Ascensor ACME v4.2"));
+  Serial.println(F("[MOD v4.2] Fuzzy Logic - SCAN corregido + Clamping servo"));
   Serial.println(F(""));
 
-  // Inicializar LCD
-  Serial.println(F("Inicializando LCD..."));
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
-  lcd.print("ACME ASCENSOR v4.1");
+  lcd.print("ACME ASCENSOR v4.2");
   lcd.setCursor(0, 1);
-  lcd.print("Fuzzy Control OK");
+  lcd.print("SCAN Stable");
   delay(1500);
-
-  Serial.println(F("Pantalla LCD inicializada."));
-  Serial.println(F("------------------------------------"));
-
-  // Inicializar bus I2C para lectura de pulsadores (PCF8574)
-  Serial.println(F("Inicializando bus I2C para pulsadores..."));
 
   bool encontrado = false;
   for (uint8_t addr = 1; addr < 127; addr++) {
@@ -478,12 +406,7 @@ void setup() {
 
   pcf8574_write(0xFF);
 
-  Serial.println(F("Pulsadores listos. Presiona cualquier boton..."));
-  Serial.println(F("Formato: [BOTON_X] PRESIONADO / SOLTADO"));
-  Serial.println();
-
   pinMode(PIN_PIR, INPUT);
-
   pinMode(PIN_EV_FRIO, OUTPUT);
   pinMode(PIN_EV_CALOR, OUTPUT);
   digitalWrite(PIN_EV_FRIO, LOW);
@@ -494,51 +417,19 @@ void setup() {
   pinMode(PIN_595_LATCH, OUTPUT);
   escribir595(0x00);
 
-  Serial.println(F(" Control de Iluminacion Inteligente v1.0"));
-  Serial.println(F("Setpoint   : 500 lux (100%)"));
-  Serial.println(F("Umbral ON  : < 390 lux (80% - 10)"));
-  Serial.println(F("Umbral OFF : > 410 lux (80% + 10)"));
-  Serial.println(F("Zona muerta: 390 - 410 lux"));
-  Serial.println(F(""));
-
   ledsEncendidos = 0;
   actualizarLeds(ledsEncendidos);
 
-  Serial.println(F("Sistema de Iluminacion inicializado."));
-  Serial.println(F("------------------------------------"));
-
-  // Servo Ascensor
   servoAscensor.attach(PIN_SERVO);
   servoAscensor.write(ANGULO_PLANTA[0]);
   anguloServo = ANGULO_PLANTA[0];
-
-  // Inicializar velocidad del control difuso
   velocidadActual = 0.0f;
 
   dht.begin();
   IrReceiver.begin(PIN_IR);
 
-  Serial.println(F(" Control de Temperatura Inteligente v1.0"));
-  Serial.println(F("Ganancia proporcional : 2.0"));
-  Serial.println(F("Ganancia integral     : 0.05"));
-  Serial.println(F("Ganancia derivativa   : 1.0"));
-  Serial.println(F("Banda muerta ±C      : 3.0 C"));
-  Serial.println(F(""));
-
   float t = dht.readTemperature();
-  if (!isnan(t)) {
-    tempMedida = t;
-  }
-
-  Serial.println(F("Sistema de Temperatura inicializado."));
-  Serial.println(F("------------------------------------"));
-
-  Serial.println(F(" Control Difuso (Fuzzy) de Movimiento v4.1"));
-  Serial.println(F("Perfil: Arranque progresivo | Crucero estable | Frenado suave"));
-  Serial.println(F("Metodo: Mamdani (min-max) + Defuzzificacion por media ponderada"));
-  Serial.println(F("Entradas: distanciaRestante + velocidadActual"));
-  Serial.println(F("Salida: deltaAngulo (incremento por ciclo)"));
-  Serial.println(F("------------------------------------"));
+  if (!isnan(t)) tempMedida = t;
 
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -546,7 +437,7 @@ void setup() {
   delay(1000);
   lcd.clear();
 
-  Serial.println(F("Sistema ascensor v4.1 LISTO!"));
+  Serial.println(F("Sistema ascensor v4.2 LISTO!"));
   Serial.println(F("------------------------------------"));  
 }
 
@@ -581,13 +472,10 @@ void loop() {
     tUltimoLCD = ahora;
     actualizarLCD();
     paginaLCD = !paginaLCD;
-    if (cabinaMov) {
-      paginaLCD = 0;  
-    }
+    if (cabinaMov) paginaLCD = 0;
   }
 
   controlIluminacion();
-
 }
 
 // ============================================================
@@ -596,13 +484,10 @@ void loop() {
 
 void actualizarLCD() {
   lcd.clear();
-
   String linea;
 
-  if (paginaLCD == 0) 
-  {
+  if (paginaLCD == 0) {
     lcd.setCursor(0, 0);
-
     linea = cabinaMov ? "Moviendo " : "En planta ";
     linea += String(plantaActual);
     if (cabinaMov) {
@@ -612,43 +497,31 @@ void actualizarLCD() {
     lcd.print(padLCD(linea));
 
     lcd.setCursor(0, 1);
-
     linea = presencia ? "Cabina: OCUPADA" : "Cabina: LIBRE";
     lcd.print(padLCD(linea));
-  } 
-  else 
-  {
+  } else {
     lcd.setCursor(0, 0);
-
     linea = "T:";
     linea += String(tempMedida, 1);
     linea += (char)223;
-    linea += "C ";
-    linea += "H:";
+    linea += "C H:";
     linea += String((int)humMedida);
     linea += "%";
-
     lcd.print(padLCD(linea));
 
     lcd.setCursor(0, 1);
-
-    if (luzLux > 999) {
-      linea = "L.DIURNA ";
-    }
+    if (luzLux > 999) linea = "L.DIURNA ";
     else {
       linea = "L:";
       linea += String(luzLux,0);
       linea += "lux ";
     }
-
     switch (accionTemp) {
       case ENFRIAR:  linea += "ENFRIAR";  break;
       case CALENTAR: linea += "CALDEAR";  break;
       default: linea += "";  break;
     }    
-
     lcd.print(padLCD(linea));
-
   }
 }
 
@@ -663,34 +536,25 @@ void actualizarLeds(uint8_t cantidad) {
 uint8_t contarBotonesPulsados() {
   uint8_t estadoActual = pcf8574_read();
   uint8_t count = 0;
-
   for (uint8_t i = 0; i < 5; i++) {
-    if (!(estadoActual & (1 << i))) {
-      count++;
-    }
+    if (!(estadoActual & (1 << i))) count++;
   }
   return count;
 }
 
 void controlIluminacion() {  
-  if (luzLux < (LUZ_UMBRAL - LUZ_HISTERESIS)) 
-  {
+  if (luzLux < (LUZ_UMBRAL - LUZ_HISTERESIS)) {
     float intervaloLux = (float)LUZ_UMBRAL / 8.0f;
     int ledsCalculados = 8 - (int)(luzLux / intervaloLux);
     ledsCalculados = constrain(ledsCalculados, 1, 8);
-
-    if (ledsCalculados != ledsEncendidos) 
-    {
+    if (ledsCalculados != ledsEncendidos) {
       ledsEncendidos = ledsCalculados;
       actualizarLeds(ledsEncendidos);
-
       Serial.print(F("Luz=")); Serial.print(luzLux);
       Serial.print(F(" LEDs=")); Serial.println(ledsEncendidos);      
     }
-  } else if (luzLux > (LUZ_UMBRAL + LUZ_HISTERESIS)) 
-  {
-    if (ledsEncendidos > 0) 
-    {
+  } else if (luzLux > (LUZ_UMBRAL + LUZ_HISTERESIS)) {
+    if (ledsEncendidos > 0) {
       ledsEncendidos = 0;
       actualizarLeds(ledsEncendidos);  
     }
@@ -706,42 +570,33 @@ void controlTemperatura() {
     float error = TEMP_SETPOINT - tempMedida;
 
     if (fabs(error) < TEMP_ZONA_M) {
-        pidIntegral = pidIntegral;
-
         AccionTemp accionAnterior = accionTemp;
         accionTemp = REPOSO_TEMP;
         digitalWrite(PIN_EV_FRIO, LOW);
         digitalWrite(PIN_EV_CALOR, LOW);
-
         if (accionTemp != accionAnterior) {
             Serial.print(F("Temp="));
             Serial.print(tempMedida, 1);
             Serial.print(F("C (zona muerta) Accion=REPOSO\n"));
         }
-
         return;
     }
 
     pidIntegral += error * dt;
     pidIntegral = constrain(pidIntegral, -PID_INT_MAX, PID_INT_MAX);
-
     float derivada = (error - pidErrorPrev) / dt;
     pidErrorPrev = error;
-
     float salida = PID_KP * error + PID_KI * pidIntegral + PID_KD * derivada;
 
     AccionTemp accionAnterior = accionTemp;
-
     if (salida > PID_DEADBAND) {
         accionTemp = CALENTAR;
         digitalWrite(PIN_EV_FRIO, LOW);
         digitalWrite(PIN_EV_CALOR, HIGH);
-
     } else if (salida < -PID_DEADBAND) {
         accionTemp = ENFRIAR;
         digitalWrite(PIN_EV_FRIO, HIGH);
         digitalWrite(PIN_EV_CALOR, LOW);
-
     } else {
         accionTemp = REPOSO_TEMP;
         digitalWrite(PIN_EV_FRIO, LOW);
@@ -756,8 +611,7 @@ void controlTemperatura() {
         Serial.print(F(" Accion="));
         Serial.println(
             accionTemp == ENFRIAR ? F("ENFRIAR") :
-            accionTemp == CALENTAR ? F("CALENTAR") :
-                                     F("REPOSO")
+            accionTemp == CALENTAR ? F("CALENTAR") : F("REPOSO")
         );
     }
 }
@@ -769,33 +623,18 @@ void escribir595(uint8_t valor) {
 }
 
 void leerIR() {
-  if (!IrReceiver.decode()) {
-    return;
-  }
-
+  if (!IrReceiver.decode()) return;
   if (IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT) {
     IrReceiver.resume();
     return;
   }
 
   uint32_t codigo = IrReceiver.decodedIRData.decodedRawData;
-
   if (codigo == 0 || IrReceiver.decodedIRData.protocol != NEC ||
       IrReceiver.decodedIRData.numberOfBits != 32) {
-    Serial.print(F("[DEBUG] IR ignorado: protocolo="));
-    Serial.print(IrReceiver.decodedIRData.protocol);
-    Serial.print(F(" bits="));
-    Serial.print(IrReceiver.decodedIRData.numberOfBits);
-    Serial.print(F(" raw=0x"));
-    Serial.println(codigo, HEX);
     IrReceiver.resume();
     return;
   }
-
-  Serial.print(F("[DEBUG] IR command: "));
-  Serial.println(IrReceiver.decodedIRData.command);
-  Serial.print(F("[DEBUG] IR raw: 0x"));
-  Serial.println(codigo, HEX);
 
   for (uint8_t i = 0; i < 5; i++) {
     if (codigo == IR_CODIGO[i]) {
@@ -809,32 +648,23 @@ void leerIR() {
 
 float leerLux() {
   int analogValue = analogRead(PIN_LDR);
-
   if (analogValue < 0) return 0;
-
   float voltage = analogValue / 1024.0 * 5.0;
   float resistance = 2000 * voltage / (1 - voltage / 5.0);
-  float lux = pow(RL10 * 1e3 * pow(10, GAMMA) / resistance, (1 / GAMMA));
-
-  return lux;
+  return pow(RL10 * 1e3 * pow(10, GAMMA) / resistance, (1 / GAMMA));
 }
 
 void leerPulsadores() {
   uint8_t estadoActual = pcf8574_read();
-
-  if (estadoActual != ultimaLectura) {
-    ultimoCambio = millis();
-  }
+  if (estadoActual != ultimaLectura) ultimoCambio = millis();
   ultimaLectura = estadoActual;
 
   if ((millis() - ultimoCambio) > DEBOUNCE_MS) {
     uint8_t cambios = (estadoActual ^ estadoAnterior) & BOTONES_MASK;
-
     if (cambios != 0) {
       for (uint8_t i = 0; i < 5; i++) {
         if (cambios & (1 << i)) {
           bool presionado = !(estadoActual & (1 << i));
-
           if (presionado) {
             agregarSolicitud(i + 1);
             Serial.print(F("[BOTON_P"));
@@ -846,43 +676,29 @@ void leerPulsadores() {
       estadoAnterior = estadoActual;
     }
   }
-
 }
 
 void leerSensores() {
   float t = dht.readTemperature();
   float h = dht.readHumidity();
   float l = leerLux();
-
   bool cambio = false;
 
-  if (!isnan(t) && t != tempMedida) {
-    tempMedida  = t;
-    cambio = true;
-  }
-  if (!isnan(h) && h != humMedida) {
-    humMedida = h;
-    cambio = true;
-  }
-
-  if (l != luzLux) {
-    luzLux = l;
-    cambio = true;
-  }
+  if (!isnan(t) && t != tempMedida) { tempMedida = t; cambio = true; }
+  if (!isnan(h) && h != humMedida) { humMedida = h; cambio = true; }
+  if (l != luzLux) { luzLux = l; cambio = true; }
 
   if (cambio) {
-    Serial.print(F("T="));    Serial.print(tempMedida);
+    Serial.print(F("T=")); Serial.print(tempMedida);
     Serial.print(F("C H=")); Serial.print(humMedida);
     Serial.print(F("% Luz=")); Serial.print(luzLux);
     Serial.println(F("lux"));
   }
-
 }
 
 void agregarSolicitud(uint8_t planta) {
   if (planta < 1 || planta > MAX_PLANTAS) return;
   uint8_t idx = planta - 1;
-
   if (!solicitudes[idx]) {
     solicitudes[idx] = true;
     tiempoSolicitud[idx] = millis();
@@ -898,7 +714,6 @@ void agregarSolicitud(uint8_t planta) {
 void eliminarSolicitud(uint8_t planta) {
   if (planta < 1 || planta > MAX_PLANTAS) return;
   uint8_t idx = planta - 1;
-
   if (solicitudes[idx]) {
     solicitudes[idx] = false;
     contadorSolicitudes[idx] = 0;
@@ -943,13 +758,9 @@ uint8_t calcularPrioridad() {
     unsigned long tSol = tiempoSolicitud[i];
     bool mejor = false;
 
-    if (dist < mejorDistancia) {
-      mejor = true;
-    } else if (dist == mejorDistancia && cnt > mejorContador) {
-      mejor = true;
-    } else if (dist == mejorDistancia && cnt == mejorContador && tSol < mejorTiempo) {
-      mejor = true;
-    }
+    if (dist < mejorDistancia) mejor = true;
+    else if (dist == mejorDistancia && cnt > mejorContador) mejor = true;
+    else if (dist == mejorDistancia && cnt == mejorContador && tSol < mejorTiempo) mejor = true;
 
     if (mejor) {
       mejorPlanta = p;
@@ -979,13 +790,9 @@ uint8_t calcularPrioridad() {
       unsigned long tSol = tiempoSolicitud[i];
       bool mejor = false;
 
-      if (dist < mejorDistancia) {
-        mejor = true;
-      } else if (dist == mejorDistancia && cnt > mejorContador) {
-        mejor = true;
-      } else if (dist == mejorDistancia && cnt == mejorContador && tSol < mejorTiempo) {
-        mejor = true;
-      }
+      if (dist < mejorDistancia) mejor = true;
+      else if (dist == mejorDistancia && cnt > mejorContador) mejor = true;
+      else if (dist == mejorDistancia && cnt == mejorContador && tSol < mejorTiempo) mejor = true;
 
       if (mejor) {
         mejorPlanta = p;
@@ -1032,7 +839,6 @@ float fuzzificarTriangular(float x, float a, float b, float c) {
 }
 
 float controlFuzzy(float distancia, float velocidad) {
-  // Fuzzificación de distanciaRestante
   float muDistCerca  = fuzzificarTrapezoidal(distancia, 
     FUZZY_DIST_CERCA_A, FUZZY_DIST_CERCA_B, 
     FUZZY_DIST_CERCA_C, FUZZY_DIST_CERCA_D);
@@ -1043,7 +849,6 @@ float controlFuzzy(float distancia, float velocidad) {
     FUZZY_DIST_LEJOS_A, FUZZY_DIST_LEJOS_B, 
     FUZZY_DIST_LEJOS_C, FUZZY_DIST_LEJOS_D);
 
-  // Fuzzificación de velocidadActual
   float muVelLenta   = fuzzificarTrapezoidal(velocidad, 
     FUZZY_VEL_LENTA_A, FUZZY_VEL_LENTA_B, 
     FUZZY_VEL_LENTA_C, FUZZY_VEL_LENTA_D);
@@ -1053,81 +858,63 @@ float controlFuzzy(float distancia, float velocidad) {
     FUZZY_VEL_RAPIDA_A, FUZZY_VEL_RAPIDA_B, 
     FUZZY_VEL_RAPIDA_C, FUZZY_VEL_RAPIDA_D);
 
-  // Evaluación de reglas (Mamdani, AND = min)
   float w[9];
   float s[9];
   uint8_t numReglas = 0;
 
-  // Regla 1: CERCA + LENTA → MUY_LENTO
   w[numReglas] = min(muDistCerca, muVelLenta);
   s[numReglas] = FUZZY_OUT_MUY_LENTO;
   numReglas++;
 
-  // Regla 2: CERCA + MEDIA → MUY_LENTO
   w[numReglas] = min(muDistCerca, muVelMedia);
   s[numReglas] = FUZZY_OUT_MUY_LENTO;
   numReglas++;
 
-  // Regla 3: CERCA + RÁPIDA → LENTO
   w[numReglas] = min(muDistCerca, muVelRapida);
   s[numReglas] = FUZZY_OUT_LENTO;
   numReglas++;
 
-  // Regla 4: MEDIA + LENTA → MEDIO
   w[numReglas] = min(muDistMedia, muVelLenta);
   s[numReglas] = FUZZY_OUT_MEDIO;
   numReglas++;
 
-  // Regla 5: MEDIA + MEDIA → RÁPIDO
   w[numReglas] = min(muDistMedia, muVelMedia);
   s[numReglas] = FUZZY_OUT_RAPIDO;
   numReglas++;
 
-  // Regla 6: MEDIA + RÁPIDA → LENTO
   w[numReglas] = min(muDistMedia, muVelRapida);
   s[numReglas] = FUZZY_OUT_LENTO;
   numReglas++;
 
-  // Regla 7: LEJOS + LENTA → RÁPIDO
   w[numReglas] = min(muDistLejos, muVelLenta);
   s[numReglas] = FUZZY_OUT_RAPIDO;
   numReglas++;
 
-  // Regla 8: LEJOS + MEDIA → RÁPIDO
   w[numReglas] = min(muDistLejos, muVelMedia);
   s[numReglas] = FUZZY_OUT_RAPIDO;
   numReglas++;
 
-  // Regla 9: LEJOS + RÁPIDA → MUY_RÁPIDO
   w[numReglas] = min(muDistLejos, muVelRapida);
   s[numReglas] = FUZZY_OUT_MUY_RAPIDO;
   numReglas++;
 
-  // Defuzzificación por media ponderada
   float numerador = 0.0f;
   float denominador = 0.0f;
-
   for (uint8_t i = 0; i < numReglas; i++) {
     numerador   += w[i] * s[i];
     denominador += w[i];
   }
 
   float delta;
-  if (denominador > 0.001f) {
-    delta = numerador / denominador;
-  } else {
-    delta = FUZZY_OUT_MUY_LENTO;
-  }
+  if (denominador > 0.001f) delta = numerador / denominador;
+  else delta = FUZZY_OUT_MUY_LENTO;
 
-  if (delta > FUZZY_VEL_MAX) {
-    delta = FUZZY_VEL_MAX;
-  }
-
+  if (delta > FUZZY_VEL_MAX) delta = FUZZY_VEL_MAX;
   return delta;
 }
 
 // ============================================================
-// MÁQUINA DE ESTADOS DEL ASCENSOR — v4.1
+// MÁQUINA DE ESTADOS DEL ASCENSOR — v4.2
 // ============================================================
 
 void manejarEstadoAscensor() {
@@ -1142,15 +929,10 @@ void manejarEstadoAscensor() {
       break;
 
     case ASCENSOR_PUERTA_CERRADA:
-      if (tPuertaCerrada == 0) {
-        tPuertaCerrada = ahora;
-      }
-
+      if (tPuertaCerrada == 0) tPuertaCerrada = ahora;
       if (ahora - tPuertaCerrada >= TIEMPO_CIERRE_PUERTA) {
         tPuertaCerrada = 0;
-
         uint8_t prio = calcularPrioridad();
-
         if (prio != 0 && prio != plantaActual) {
           plantaDestino = prio;
           transicionEstado(ASCENSOR_MOVIMIENTO);
@@ -1164,10 +946,16 @@ void manejarEstadoAscensor() {
       break;
 
     case ASCENSOR_MOVIMIENTO:
+      // [CORRECCIÓN v4.2] Recalcular prioridad con validación de redirección
       if (numSolicitudes > 0) {
         uint8_t nuevaPrioridad = calcularPrioridad();
-        if (nuevaPrioridad != 0 && nuevaPrioridad != plantaDestino) {
+        // Solo redirigir si la nueva planta es diferente Y físicamente válida
+        if (nuevaPrioridad != 0 && 
+            nuevaPrioridad != plantaDestino && 
+            esRedireccionValida(nuevaPrioridad)) {
           plantaDestino = nuevaPrioridad;
+          // [CORRECCIÓN v4.2] Reset parcial de velocidad para nuevo perfil fuzzy
+          velocidadActual = 0.0f;
           Serial.print(F("[SCAN] Redirigiendo hacia P"));
           Serial.println(plantaDestino);
         }
@@ -1186,45 +974,33 @@ void manejarEstadoAscensor() {
       if (presencia && contarBotonesPulsados() > 1) {
         transicionEstado(ASCENSOR_EMERGENCIA);
       }
-
       break;
 
     case ASCENSOR_PUERTA_ABIERTA:
-      if (tPuertaAbierta == 0) {
-        tPuertaAbierta = ahora;
-      }
-
+      if (tPuertaAbierta == 0) tPuertaAbierta = ahora;
       if (ahora - tPuertaAbierta >= 3000) {
         tPuertaAbierta = 0;
         transicionEstado(ASCENSOR_PUERTA_CERRADA);
       }
-
       break;
 
     case ASCENSOR_EMERGENCIA:
       cabinaMov = false;
-
       if (millis() % 1000 < 100) {
         Serial.println(F("EMERGENCIA! Ascensor detenido."));
       }
-
-      if (tEmergencia == 0) {
-        tEmergencia = ahora;
-      }
-
+      if (tEmergencia == 0) tEmergencia = ahora;
       if (ahora - tEmergencia >= 10000) {
         tEmergencia = 0;
         Serial.println(F("Reset automatico de emergencia."));
         transicionEstado(ASCENSOR_REPOSO);
       }
-
       break;
 
     case ASCENSOR_MANTENIMIENTO:
       if (millis() % 2000 < 100) {
         Serial.println(F("MODO MANTENIMIENTO - Debug activo"));
       }
-
       break;
 
     default:
@@ -1237,25 +1013,21 @@ void manejarEstadoAscensor() {
 // ============================================================
 // moverAscensor()
 // ---------------
-// [CORRECCIÓN v4.1] Control de movimiento mediante lógica difusa.
+// [CORRECCIÓN v4.2] Control de movimiento con lógica difusa.
 //
-// CAMBIOS CRÍTICOS respecto a v4.0:
-//   1. Eliminada la condición prematura "if (plantaDestino == plantaActual)"
-//      que causaba paradas en posiciones intermedias. Ahora el ascensor
-//      SOLO se detiene cuando anguloServo == destino exacto.
-//   2. plantaActual durante el movimiento se calcula mediante
-//      determinarPlantaDesdeAngulo(), que usa redondeo con zona muerta
-//      de ±22°, evitando oscilaciones en los límites de planta.
-//   3. Cuando distanciaRestante <= 2°, se fuerza delta = 1° exacto
-//      para garantizar parada precisa sin residuos de distancia.
-//
-// El perfil de velocidad sigue siendo:
-//   · Arranque progresivo → crucero estable → frenado suave
+// CAMBIOS CRÍTICOS:
+//   1. Clamping estricto de anguloServo a [0, 180] para evitar
+//      que el servo gire fuera de sus límites físicos.
+//   2. La dirección de movimiento se determina comparando
+//      anguloServo contra destino en CADA ciclo, no usando
+//      plantaDestino > plantaActual (que podía quedar obsoleto).
+//   3. Al llegar exactamente al destino, se actualiza plantaActual
+//      y se limpia velocidadActual.
 // ============================================================
 void moverAscensor() {
   int destino = ANGULO_PLANTA[plantaDestino - 1];
 
-  // [CORRECCIÓN v4.1] Si ya estamos exactamente en destino, confirmar llegada
+  // Si ya estamos exactamente en destino, confirmar llegada
   if (anguloServo == destino) {
     plantaActual = plantaDestino;
     cabinaMov = false;
@@ -1265,12 +1037,14 @@ void moverAscensor() {
 
   cabinaMov = true;
 
-  // Determinar dirección de marcha para el algoritmo SCAN
-  if (plantaDestino > plantaActual) {
-    direccionActual = DIR_SUBIENDO;
-  } else if (plantaDestino < plantaActual) {
-    direccionActual = DIR_BAJANDO;
-  }
+  // [CORRECCIÓN v4.2] Determinar dirección comparando posición actual vs destino REAL
+  // No usar plantaDestino > plantaActual, que puede quedar desfasado
+  bool subiendo = (anguloServo < destino);
+  bool bajando = (anguloServo > destino);
+
+  // Actualizar dirección lógica para SCAN
+  if (subiendo) direccionActual = DIR_SUBIENDO;
+  else if (bajando) direccionActual = DIR_BAJANDO;
 
   // Calcular distancia restante (siempre positiva)
   float distanciaRestante = abs(destino - anguloServo);
@@ -1278,37 +1052,41 @@ void moverAscensor() {
   // Control difuso: obtener incremento óptimo
   float deltaAngulo = controlFuzzy(distanciaRestante, velocidadActual);
 
-  // [CORRECCIÓN v4.1] Precisión final: a <= 2° forzar avance exacto de 1°
-  // Esto garantiza que el servo nunca se quede a 1° del destino por
-  // truncamiento del fuzzy o del cast a (int).
+  // Precisión final: a <= 2° forzar avance exacto de 1°
   if (distanciaRestante <= FUZZY_DIST_MINIMA) {
-    deltaAngulo = FUZZY_OUT_MUY_LENTO;  // 1 grado por ciclo
+    deltaAngulo = FUZZY_OUT_MUY_LENTO;
   }
 
   // Aplicar incremento en la dirección correcta
-  if (anguloServo < destino) {
+  if (subiendo) {
     anguloServo += (int)deltaAngulo;
+    // [CORRECCIÓN v4.2] Clamping estricto superior
     if (anguloServo >= destino) anguloServo = destino;
-  } else if (anguloServo > destino) {
+    if (anguloServo > SERVO_MAX) anguloServo = SERVO_MAX;
+  } else if (bajando) {
     anguloServo -= (int)deltaAngulo;
+    // [CORRECCIÓN v4.2] Clamping estricto inferior
     if (anguloServo <= destino) anguloServo = destino;
+    if (anguloServo < SERVO_MIN) anguloServo = SERVO_MIN;
   }
 
-  // Actualizar velocidad actual para el siguiente ciclo (realimentación)
+  // Actualizar velocidad para siguiente ciclo
   velocidadActual = deltaAngulo;
+
+  // [CORRECCIÓN v4.2] Segundo clamping de seguridad antes de escribir al servo
+  if (anguloServo < SERVO_MIN) anguloServo = SERVO_MIN;
+  if (anguloServo > SERVO_MAX) anguloServo = SERVO_MAX;
 
   servoAscensor.write(anguloServo);
 
   if (anguloServo == destino) {
-    // [CORRECCIÓN v4.1] Llegada exacta confirmada
+    // Llegada exacta confirmada
     plantaActual = plantaDestino;
     cabinaMov = false;
     velocidadActual = 0.0f;
     Serial.print(F("Llegada P")); Serial.println(plantaActual);
   } else {
-    // [CORRECCIÓN v4.1] Actualizar plantaActual de forma robusta usando
-    // redondeo al ángulo más cercano. Esto evita que SCAN trabaje sobre
-    // una planta lógica incorrecta cuando se redirige durante el movimiento.
+    // Actualizar planta lógica de forma robusta
     plantaActual = determinarPlantaDesdeAngulo(anguloServo);
   }
 }
@@ -1318,20 +1096,16 @@ void transicionEstado(EstadoAscensor nuevoEstado) {
     case ASCENSOR_MOVIMIENTO:
       cabinaMov = false;
       break;
-
     case ASCENSOR_EMERGENCIA:
       tEmergencia = 0;
       Serial.println(F("Saliendo de modo emergencia"));
       break;
-
     case ASCENSOR_PUERTA_ABIERTA:
       tPuertaAbierta = 0;
       break;
-
     case ASCENSOR_PUERTA_CERRADA:
       tPuertaCerrada = 0;
       break;
-
     default:
       break;
   }
@@ -1353,6 +1127,8 @@ void transicionEstado(EstadoAscensor nuevoEstado) {
       break;
 
     case ASCENSOR_MOVIMIENTO:
+      // [CORRECCIÓN v4.2] Registrar planta de origen para validar redirecciones
+      plantaOrigenMovimiento = plantaActual;
       Serial.print(F("Estado: MOVIMIENTO P"));
       Serial.print(plantaActual);
       Serial.print(F(" -> P"));
@@ -1405,9 +1181,7 @@ String padLCD(String texto) {
 uint8_t pcf8574_read() {
   uint8_t valor = 0xFF;
   Wire.requestFrom(PCF8574_ADDR, (uint8_t)1);
-  if (Wire.available()) {
-    valor = Wire.read();
-  }
+  if (Wire.available()) valor = Wire.read();
   return valor;
 }
 

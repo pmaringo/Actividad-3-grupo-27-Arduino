@@ -46,7 +46,7 @@ Un requisito de diseño prioritario ha sido garantizar que el firmware opere de 
 
 El reparto temporal de las tareas se ha definido conforme al siguiente criterio: la máquina de estados se evalúa en cada iteración del bucle; la lectura de pulsadores y del mando IR se realiza cada 10 ms, con un filtro anti-rebote de 25 ms integrado en la propia rutina de lectura; el lector RFID se consulta cada 200 ms, periodo sobradamente suficiente dada la dinámica de presentación de una tarjeta; los sensores ambientales (DHT22, LDR y PIR) se muestrean cada 2 s; el controlador PID de temperatura se ejecuta cada 500 ms; el display LCD se refresca cada 2 s alternando entre dos pantallas; y el control de iluminación se evalúa en cada iteración del bucle, con objeto de minimizar la latencia de respuesta ante variaciones bruscas de iluminancia.
 
-![](media/image3.png)
+![](media/image2.png)
 
 *Figura 3. Diagrama de flujo del bucle principal loop(). Cada bloque verde, morado o rojo se ejecuta sólo cuando se cumple su condición temporal asociada; los bloques blancos representan los chequeos de Δt basados en millis().*
 

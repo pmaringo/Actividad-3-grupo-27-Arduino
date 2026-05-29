@@ -100,7 +100,7 @@ En la v2.0 el ascensor pasaba directamente de REPOSO a MOVIMIENTO en cuanto reci
     │◄──[PUERTA_ABIERTA]◄──────────┘                              │
     │         (3 s)                                               │
     │                                                             │
-    └──[EMERGENCIA]◄──(presencia PIR + >1 botón pulsado)─────────┘
+    └──[EMERGENCIA]◄──(presencia PIR + >1 botón pulsado) ─────────┘
               (reset auto 10 s)
 ```
 

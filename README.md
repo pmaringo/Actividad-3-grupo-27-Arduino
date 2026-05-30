@@ -74,7 +74,7 @@ restricción de acceso a zonas autorizadas habitual en edificios de uso terciari
 - ✅ **Cola múltiple de solicitudes** con prioridad por distancia, demanda y antigüedad.
 - ✅ **Algoritmo SCAN** con redirección dinámica durante el movimiento.
 - ✅ **Controlador difuso Mamdani** de 9 reglas para el perfil de velocidad del servo.
-- ✅ **Controlador PID** con anti-windup, banda muerta y zona muerta del error.
+- ✅ **Controlador PID** con anti-windup, banda muerta y zona muerta del error para la temperatura.
 - ✅ **Control proporcional inverso con histéresis** para la iluminación.
 - ✅ **Filtrado anti-rebote temporal** de los pulsadores (25 ms).
 - ✅ **Histéresis de planta** que separa el estado lógico del estado físico de la cabina.
